@@ -1,0 +1,766 @@
+{/*
+  Troubleshooting Guide | 故障排除指南
+  
+  本文档记录常见问题的应急处理方案和修复脚本
+  This document records emergency solutions and fix scripts for common issues
+*/}
+
+# Troubleshooting Guide | 故障排除指南
+
+## 概览 Overview
+
+本文档提供 MediCareAI 系统的常见故障排除指南和应急脚本说明。
+
+This document provides troubleshooting guides and emergency scripts for MediCareAI system.
+
+---
+
+## 🆘 应急脚本 Emergency Scripts
+
+### 1. Docker 清理脚本 Docker Cleanup Script
+
+**文件位置 | Location**: `scripts/cleanup-docker.sh`
+
+**用途 | Purpose**:
+清理所有 Docker 数据，包括容器、卷、网络。用于完全重置环境。
+
+Clean all Docker data including containers, volumes, networks. Used for complete environment reset.
+
+**使用场景 | When to Use**:
+- 全新部署前清理环境
+- Docker 状态异常需要重置
+- 磁盘空间不足需要清理
+
+**使用方法 | Usage**:
+```bash
+# 交互模式（默认）
+./scripts/cleanup-docker.sh
+
+# 自动确认模式（非交互式）
+./scripts/cleanup-docker.sh -y
+# 或
+./scripts/cleanup-docker.sh --yes
+```
+
+**⚠️ 警告 | Warning**:
+此脚本会删除所有数据，包括数据库！使用前务必备份。
+
+This script deletes ALL data including databases! Backup before use.
+
+---
+
+## 🔧 常见问题 Common Issues
+
+### 问题 1: PostgreSQL 健康检查失败
+
+**现象 | Symptoms**:
+```
+medicare_postgres is unhealthy
+```
+
+**解决方案 | Solution**:
+已在 `docker-compose.yml` 中添加 `start_period: 60s` 给数据库足够的初始化时间。
+
+Already added `start_period: 60s` in `docker-compose.yml` for database initialization.
+
+---
+
+### 问题 2: Docker Compose 命令不兼容
+
+**现象 | Symptoms**:
+```
+docker-compose: command not found
+```
+
+**解决方案 | Solution**:
+`scripts/cleanup-docker.sh` 已兼容 Docker Compose v1 (`docker-compose`) 和 v2 (`docker compose`)。
+
+The cleanup script supports both Docker Compose v1 and v2.
+
+---
+
+### 问题 3: 环境变量未同步到容器
+
+**现象 | Symptoms**:
+修改 `.env` 文件后，容器内的配置未更新。
+
+**解决方案 | Solution**:
+```bash
+# 重启后端服务
+docker-compose restart backend
+
+# 或者完全重新创建容器
+docker-compose stop backend
+docker-compose rm backend
+docker-compose up -d backend
+```
+
+**原理 | Explanation**:
+Docker 的卷挂载可能需要重启容器才能同步最新的 `.env` 文件内容。
+
+---
+
+### 问题 4: 首次部署数据库连接失败
+
+**现象 | Symptoms**:
+```
+Connection refused to PostgreSQL
+```
+
+**解决方案 | Solution**:
+等待数据库完全启动：
+```bash
+# 检查 PostgreSQL 健康状态
+docker-compose ps
+
+# 查看日志
+docker-compose logs postgres
+
+# 等待健康检查通过后重启后端
+docker-compose restart backend
+```
+---
+
+### 问题 5: API_KEY_MASTER_KEY 环境变量错误
+
+**现象 | Symptoms**:
+```
+ValueError: API_KEY_MASTER_KEY environment variable is required
+```
+或后端启动时提示加密密钥错误。
+
+**原因 | Cause**:
+从 v2.1.2 版本开始，系统移除了硬编码的加密密钥，必须通过环境变量 `API_KEY_MASTER_KEY` 配置。
+
+**解决方案 | Solution**:
+
+1. 生成安全的随机密钥:
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+2. 编辑 `.env` 文件，添加生成的密钥:
+```bash
+API_KEY_MASTER_KEY=your_generated_key_here
+```
+
+3. 重新部署后端服务:
+```bash
+docker-compose stop backend
+docker-compose rm backend
+docker-compose up -d backend
+```
+
+**警告 | Warning**:
+- 一旦设置 `API_KEY_MASTER_KEY`，请勿更改！
+- 更改此密钥会导致数据库中已加密的 API 密钥无法解密
+- 请在首次部署前妥善保存此密钥
+
+---
+---
+
+## 📝 维护任务 Maintenance Tasks
+
+### 备份数据库 Backup Database
+
+```bash
+# 使用内置备份脚本
+./scripts/backup.sh
+
+# 手动备份
+docker exec medicare_postgres pg_dump -U medicare_user medicareai > backup_$(date +%Y%m%d).sql
+```
+
+### 查看日志 View Logs
+
+```bash
+# 所有服务日志
+docker-compose logs
+
+# 特定服务
+docker-compose logs backend
+docker-compose logs postgres
+docker-compose logs redis
+
+# 实时跟踪
+docker-compose logs -f backend
+```
+
+### 重启服务 Restart Services
+
+```bash
+# 重启所有服务
+docker-compose restart
+
+# 重启特定服务
+docker-compose restart backend
+docker-compose restart postgres
+```
+
+---
+
+## 🐛 调试技巧 Debug Tips
+
+### 检查容器状态 Check Container Status
+
+```bash
+docker-compose ps
+docker stats
+```
+
+### 进入容器调试 Enter Container for Debug
+
+```bash
+# 进入后端容器
+docker exec -it medicare_backend /bin/sh
+
+# 进入数据库容器
+docker exec -it medicare_postgres psql -U medicare_user -d medicareai
+```
+
+### 测试 API Test API
+
+```bash
+# 健康检查
+curl http://localhost/health
+
+# 测试登录
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@medicare.ai","password":"admin123456"}'
+```
+
+---
+
+## 📊 系统资源监控 System Resource Monitoring
+
+### 查看容器资源使用 Container Resource Usage
+
+```bash
+docker stats
+```
+
+### 查看磁盘使用 Disk Usage
+
+```bash
+docker system df
+docker system df -v
+```
+
+### 清理未使用资源 Cleanup Unused Resources
+
+```bash
+# 清理未使用的镜像
+docker image prune
+
+# 清理未使用的卷
+docker volume prune
+
+# 清理所有未使用资源
+# 警告：这会删除所有停止的容器、未使用的网络、镜像和构建缓存
+docker system prune -a
+```
+
+---
+
+## 🔐 安全配置 Security Configuration
+
+### SELinux 问题 SELinux Issues
+
+如果使用 SELinux 的系统（如 Fedora、RHEL、CentOS）遇到权限问题，请参考：
+
+For SELinux-enabled systems (Fedora, RHEL, CentOS), see:
+
+**📄 [SELINUX-GUIDE.mdx](SELINUX-GUIDE.mdx)**
+
+---
+
+## 📞 获取帮助 Get Help
+
+### 文档资源 Documentation Resources
+
+- **[README.md](../README.md)** - 项目概览和快速开始
+- **[DEPLOYMENT.mdx](DEPLOYMENT.mdx)** - 详细部署指南
+- **[CHANGELOG.md](../CHANGELOG.md)** - 版本历史记录
+
+### 报告问题 Report Issues
+
+如果遇到未在此文档中列出的问题：
+
+1. 查看服务日志：`docker-compose logs [service]`
+2. 检查 [CHANGELOG.md](../CHANGELOG.md) 了解已知问题
+3. 在 GitHub Issues 中搜索类似问题
+4. 创建新的 Issue 并提供详细的错误信息和日志
+
+---
+
+**最后更新 | Last Updated**: 2026-02-16  
+**版本 | Version**: v2.0.3  
+**维护者 | Maintainer**: 苏业钦 (Su Yeqin)
+
+
+---
+
+## 🚀 Deployment Troubleshooting (2026-03-02) | 部署故障排除
+
+### Issue 1: Vite 403 Forbidden - Host Not Allowed | Vite 403 错误 - 主机不允许
+
+**Symptoms | 现象**:
+```
+Blocked request. This host ("medicare_frontend") is not allowed.
+To allow this host, add "medicare_frontend" to `server.allowedHosts`
+```
+
+**Diagnosis | 诊断**:
+- Vite 6.x introduced stricter `allowedHosts` security
+- Nginx uses Docker container name as hostname
+- Container hostname not in allowed list
+
+**Quick Fix | 快速修复**:
+
+1. Edit `frontend/vite.config.ts`:
+```typescript
+export default defineConfig({
+  server: {
+    allowedHosts: ['all', 'medicare_frontend', 'your-domain.com'],
+    // ...
+  },
+})
+```
+
+2. Restart frontend container:
+```bash
+docker compose restart frontend
+```
+
+**Permanent Solution | 永久解决方案**:
+Use explicit domains in production instead of `'all'`:
+```typescript
+allowedHosts: [
+  'medicare_frontend',
+  process.env.VITE_DOMAIN || 'localhost'
+]
+```
+
+---
+
+### Issue 2: API Requests Failing - localhost:8000 Not Accessible | API 请求失败 - localhost:8000 无法访问
+
+**Symptoms | 现象**:
+- Frontend shows "Network Error"
+- Browser console shows requests to `http://localhost:8000`
+- API calls timeout or fail with CORS errors
+
+**Diagnosis | 诊断**:
+- `API_BASE` is hardcoded to `http://localhost:8000`
+- Production containers cannot access each other's localhost
+- Requests need to go through Nginx proxy
+
+**Quick Fix | 快速修复**:
+
+1. Edit `frontend/src/lib/config.ts`:
+```typescript
+export const CONFIG = {
+  API_BASE: '',  // Use relative path
+  API_VERSION: '/api/v1',
+  // ...
+}
+```
+
+2. Rebuild and restart:
+```bash
+docker compose build frontend
+docker compose up -d frontend
+```
+
+**Verification | 验证**:
+```bash
+# Check network requests in browser DevTools
+# Should see requests to `/api/v1/...` not `http://localhost:8000`
+```
+
+---
+
+### Issue 3: Vite HMR WebSocket Connection Failed | Vite HMR WebSocket 连接失败
+
+**Symptoms | 现象**:
+```
+WebSocket connection to 'wss://your-domain.com/?token=xxx' failed
+[vite] failed to connect to websocket.
+```
+
+**Diagnosis | 诊断**:
+- Vite tries to establish WebSocket for Hot Module Replacement
+- Production environment doesn't need HMR
+- WebSocket configuration incorrect
+
+**Quick Fix | 快速修复**:
+
+Edit `frontend/vite.config.ts`:
+```typescript
+export default defineConfig({
+  server: {
+    hmr: false,  // Disable HMR in production
+    // ...
+  },
+})
+```
+
+Restart frontend:
+```bash
+docker compose restart frontend
+```
+
+**Alternative | 替代方案** (if HMR needed):
+```typescript
+hmr: {
+  host: 'your-domain.com',
+  port: 443,
+  protocol: 'wss',
+}
+```
+
+---
+
+### Issue 4: SSL Certificate Permission Denied | SSL 证书权限被拒绝
+
+**Symptoms | 现象**:
+```
+nginx: [emerg] cannot load certificate "/etc/nginx/ssl/cert.pem": 
+BIO_new_file() failed (SSL: error:80000002:system library::No such file)
+```
+
+**Diagnosis | 诊断**:
+- SSL certificates copied as root user
+- Nginx container cannot read certificate files
+- File permissions incorrect
+
+**Quick Fix | 快速修复**:
+
+```bash
+# Fix SSL certificate permissions
+sudo chown $USER:$USER docker/nginx/ssl/*
+chmod 644 docker/nginx/ssl/cert.pem
+chmod 600 docker/nginx/ssl/key.pem
+
+# Restart nginx
+docker compose restart nginx
+```
+
+**Automated Fix Script | 自动修复脚本**:
+
+```bash
+#!/bin/bash
+# fix-ssl-permissions.sh
+
+CERT_DIR="docker/nginx/ssl"
+
+if [ -f "$CERT_DIR/cert.pem" ] && [ -f "$CERT_DIR/key.pem" ]; then
+    echo "Fixing SSL certificate permissions..."
+    sudo chown "$USER:$USER" "$CERT_DIR"/*
+    chmod 644 "$CERT_DIR/cert.pem"
+    chmod 600 "$CERT_DIR/key.pem"
+    echo "✅ Permissions fixed"
+    ls -la "$CERT_DIR/"
+else
+    echo "❌ Certificate files not found in $CERT_DIR"
+    exit 1
+fi
+```
+
+---
+
+### Issue 5: Admin Login - "Access Denied" Error | 管理员登录 - "访问被拒绝" 错误
+
+**Symptoms | 现象**:
+```json
+{
+  "detail": "Access denied. admin accounts can only login through admin platform(s)."
+}
+```
+
+**Diagnosis | 诊断**:
+- Backend requires `platform` parameter in login request
+- Frontend not sending platform specification
+- Admin users restricted to admin platform only
+
+**Quick Fix | 快速修复**:
+
+Verify frontend sends platform parameter:
+
+```typescript
+// AdminLoginPage.tsx
+const onSubmit = async (data) => {
+  await login({
+    email: data.email,
+    password: data.password,
+    platform: 'admin',  // REQUIRED
+  });
+};
+```
+
+**API Test | API 测试**:
+```bash
+# Test admin login
+curl -X POST https://your-domain.com/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@medicare.ai",
+    "password": "admin123456",
+    "platform": "admin"
+  }'
+```
+
+**Response Should Include | 响应应包含**:
+```json
+{
+  "user": { "role": "admin", ... },
+  "tokens": { "access_token": "..." },
+  "platform": "admin"
+}
+```
+
+---
+
+### Issue 6: HTTPS Ports 8443/8444 Not Accessible | HTTPS 端口 8443/8444 无法访问
+
+**Symptoms | 现象**:
+- Patient platform (443) works fine
+- Doctor (8443) and Admin (8444) platforms timeout
+- Connection refused or timeout errors
+
+**Diagnosis | 诊断**:
+- Cloud security group/firewall not configured
+- Docker ports not exposed
+- Nginx not listening on those ports
+
+**Quick Fix | 快速修复**:
+
+1. **Check Docker Compose ports**:
+```yaml
+# docker-compose.yml
+nginx:
+  ports:
+    - "0.0.0.0:443:443"
+    - "0.0.0.0:8443:8443"    # Doctor HTTPS
+    - "0.0.0.0:8444:8444"    # Admin HTTPS
+```
+
+2. **Check Nginx configuration**:
+```nginx
+# docker/nginx/nginx.conf
+server {
+    listen 8443 ssl;  # Doctor platform
+    # ...
+}
+
+server {
+    listen 8444 ssl;  # Admin platform
+    # ...
+}
+```
+
+3. **Configure cloud security group**:
+- **Alibaba Cloud 阿里云**: Add inbound rules for 8443, 8444
+- **AWS**: Update security group
+- **Azure**: Update network security group
+
+**Verification Script | 验证脚本**:
+```bash
+#!/bin/bash
+# verify-https-ports.sh
+
+DOMAIN="${1:-localhost}"
+
+echo "Testing HTTPS endpoints..."
+
+for port in 443 8443 8444; do
+    echo -n "Port $port: "
+    response=$(curl -s -o /dev/null -w "%{http_code}" "https://$DOMAIN:$port" --insecure 2>/dev/null)
+    if [ "$response" = "200" ] || [ "$response" = "301" ] || [ "$response" = "403" ]; then
+        echo "✅ Working (HTTP $response)"
+    else
+        echo "❌ Failed (HTTP $response)"
+    fi
+done
+```
+
+Usage | 使用方法:
+```bash
+./verify-https-ports.sh openmedicareai.life
+```
+
+---
+
+### Issue 7: Container Restart Loop | 容器重启循环
+
+**Symptoms | 现象**:
+```
+Container medicare_nginx Restarting (1) 5 seconds ago
+Container keeps restarting
+```
+
+**Diagnosis | 诊断**:
+- Configuration error preventing startup
+- Missing SSL certificates
+- Port conflicts
+- Syntax error in config files
+
+**Debug Steps | 调试步骤**:
+
+1. Check logs | 查看日志:
+```bash
+docker compose logs nginx --tail=50
+docker compose logs frontend --tail=50
+docker compose logs backend --tail=50
+```
+
+2. Test nginx configuration | 测试 nginx 配置:
+```bash
+docker compose exec nginx nginx -t
+```
+
+3. Check for port conflicts | 检查端口冲突:
+```bash
+sudo lsof -i :80
+sudo lsof -i :443
+sudo lsof -i :8443
+sudo lsof -i :8444
+```
+
+4. Verify SSL certificates exist | 验证 SSL 证书存在:
+```bash
+ls -la docker/nginx/ssl/
+```
+
+---
+
+## 📋 Deployment Checklist | 部署检查清单
+
+### Pre-Deployment | 部署前
+
+- [ ] Updated `frontend/vite.config.ts` with `allowedHosts`
+- [ ] Updated `frontend/src/lib/config.ts` with `API_BASE: ''`
+- [ ] SSL certificates in `docker/nginx/ssl/`
+- [ ] SSL certificates have correct permissions (644/600)
+- [ ] `.env` file configured with production values
+- [ ] `docker-compose.yml` exposes ports 8443, 8444
+- [ ] `docker/nginx/nginx.conf` configured for multi-platform
+
+### Deployment | 部署
+
+- [ ] Run `docker compose build --no-cache`
+- [ ] Run `docker compose up -d`
+- [ ] Wait for database initialization (30 seconds)
+- [ ] Check all containers are running: `docker compose ps`
+
+### Post-Deployment Verification | 部署后验证
+
+- [ ] Patient platform (443): `curl https://localhost --insecure`
+- [ ] Doctor platform (8443): `curl https://localhost:8443 --insecure`
+- [ ] Admin platform (8444): `curl https://localhost:8444 --insecure`
+- [ ] Admin login works with platform parameter
+- [ ] No WebSocket errors in browser console
+- [ ] API requests use relative paths
+
+---
+
+### Issue 8: Mixed Content Error - HTTPS Page Loading HTTP API | 混合内容错误 - HTTPS 页面加载 HTTP API
+
+**Symptoms | 现象**:
+```
+Mixed Content: The page at 'https://your-domain.com/patient' was loaded over HTTPS, 
+but requested an insecure XMLHttpRequest endpoint 'http://your-domain.com/api/v1/patients/'
+```
+- 患者端仪表盘显示 "加载统计数据失败"
+- 浏览器控制台显示混合内容错误
+- API 请求被浏览器阻止
+
+**Diagnosis | 诊断**:
+- Nginx 正确配置了 `X-Forwarded-Proto` 头
+- 但 FastAPI 后端默认不识别反向代理头
+- 后端生成 URL 时仍使用 HTTP 协议而非 HTTPS
+
+**Root Cause | 根本原因**:
+FastAPI 应用缺少 `ProxyHeadersMiddleware`，无法识别 Nginx 传递的 `X-Forwarded-Proto` 头信息。
+
+**Solution | 解决方案**:
+
+1. **Add ProxyHeadersMiddleware** (已修复 | Already Fixed in v3.1.1):
+
+编辑 `backend/app/main.py`:
+```python
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+app = FastAPI(...)
+
+# Add ProxyHeadersMiddleware to trust X-Forwarded-* headers from Nginx
+app.add_middleware(
+    ProxyHeadersMiddleware,
+    trusted_hosts=["*"],  # In production, specify actual Nginx container IP
+)
+```
+
+2. **Verify Nginx Configuration**:
+
+确保 `docker/nginx/nginx-ssl.conf` 包含:
+```nginx
+location /api/ {
+    proxy_pass http://backend;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header Host $host;
+    # ...
+}
+```
+
+3. **Rebuild and Restart Backend**:
+
+```bash
+# Pull latest code with fix
+git pull
+
+# Rebuild backend image
+docker compose build --no-cache backend
+
+# Restart backend service
+docker compose up -d backend
+
+# Verify the fix
+docker compose logs backend --tail=20
+```
+
+**Verification | 验证**:
+
+```bash
+# Test API endpoint
+curl -s -o /dev/null -w "%{http_code}" https://your-domain.com/api/v1/patients/
+# Should return: 403 (authentication required, not a protocol error)
+
+# Check no mixed content errors in browser
+# Open https://your-domain.com/patient
+# Open DevTools > Console
+# Should see no "Mixed Content" errors
+```
+
+**Prevention | 预防措施**:
+
+When deploying behind a reverse proxy, always add `ProxyHeadersMiddleware`:
+
+```python
+# For production with specific trusted hosts
+app.add_middleware(
+    ProxyHeadersMiddleware,
+    trusted_hosts=["medicare_nginx", "localhost", "your-domain.com"],
+)
+```
+
+---
+
+**Last Updated | 最后更新**: 2026-03-02  
+**Version | 版本**: v3.1.1  
+**Maintainer | 维护者**: MediCareAI Team
+
+**Last Updated | 最后更新**: 2026-03-02  
+**Version | 版本**: v2.1.0  
+**Maintainer | 维护者**: MediCareAI Team

@@ -1,0 +1,564 @@
+{/*
+  API Documentation | API 文档
+  
+  RESTful API 完整参考 / Complete RESTful API Reference
+  中文在前，英文在后 | Chinese first, English second
+*/}
+
+# API 文档 | API Documentation
+
+> **MediCare_AI** RESTful API 完整参考 / Complete RESTful API Reference  
+> **版本 / Version:** 2.1.0 | **Base URL:** `http://localhost:8000/api/v1`
+
+---
+
+## 📋 目录 | Table of Contents
+
+1. [概述 | Overview](#overview)
+2. [认证 | Authentication](#authentication)
+3. [错误处理 | Error Handling](#error-handling)
+4. [API 端点 | API Endpoints](#endpoints)
+5. [数据模型 | Data Models](#data-models)
+6. [代码示例 | Code Examples](#examples)
+
+---
+
+<a name="overview"></a>
+## 1. 概述 | Overview
+
+### 1.1 API 设计原则 | API Design Principles
+
+- **RESTful**: 基于资源的 URL 和 HTTP 动词 / Resource-based URLs with HTTP verbs
+- **JSON**: 所有请求和响应使用 JSON / All requests and responses use JSON
+- **版本控制**: API 版本在 URL 路径中 / API version in URL path (`/api/v1/`)
+- **一致性**: 标准化的响应格式 / Standardized response format
+- **文档化**: 自动生成 Swagger/OpenAPI 文档 / Auto-generated Swagger/OpenAPI docs
+
+### 1.2 基础 URL | Base URL
+
+```
+开发环境 / Development: http://localhost:8000/api/v1
+生产环境 / Production:   https://your-domain.com/api/v1
+```
+
+### 1.3 请求/响应格式 | Request/Response Format
+
+**标准响应结构 / Standard Response Structure:**
+```json
+{
+  "success": true,
+  "data": { },
+  "message": "操作成功完成 | Operation completed successfully",
+  "timestamp": "2025-02-01T10:00:00Z"
+}
+```
+
+**错误响应结构 / Error Response Structure:**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "请求验证失败 | Request validation failed",
+    "details": [ ]
+  },
+  "timestamp": "2025-02-01T10:00:00Z"
+}
+```
+
+---
+
+<a name="authentication"></a>
+## 2. 认证 | Authentication
+
+### 2.1 JWT 认证 | JWT Authentication
+
+MediCare_AI 使用 JWT (JSON Web Token) 进行认证。  
+MediCare_AI uses JWT (JSON Web Token) for authentication.
+
+**认证流程 / Authentication Flow:**
+1. 用户登录获取访问令牌和刷新令牌 / User logs in to get access and refresh tokens
+2. 在请求头中包含访问令牌 / Include access token in request header
+3. 令牌过期后使用刷新令牌获取新令牌 / Use refresh token to get new tokens after expiration
+
+### 2.2 认证头 | Authentication Header
+
+```http
+Authorization: Bearer <access_token>
+```
+
+### 2.3 认证端点 | Authentication Endpoints
+
+#### 用户注册 | User Registration
+```http
+POST /api/v1/auth/register
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "securepassword123",
+  "full_name": "张三 | Zhang San",
+  "role": "patient"
+}
+```
+
+**响应 / Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "uuid",
+      "email": "user@example.com",
+      "full_name": "张三 | Zhang San",
+      "role": "patient"
+    },
+    "tokens": {
+      "access_token": "eyJhbGciOiJIUzI1NiIs...",
+      "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+      "token_type": "bearer",
+      "expires_in": 1800
+    }
+  },
+  "message": "注册成功 | Registration successful"
+}
+```
+
+#### 用户登录 | User Login
+```http
+POST /api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "securepassword123",
+  "platform": "patient"  // patient, doctor, admin
+}
+```
+
+#### 刷新令牌 | Refresh Token
+```http
+POST /api/v1/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs..."
+}
+```
+
+---
+
+<a name="error-handling"></a>
+## 3. 错误处理 | Error Handling
+
+### 3.1 HTTP 状态码 | HTTP Status Codes
+
+| 状态码 / Code | 含义 / Meaning | 说明 / Description |
+|--------------|---------------|-------------------|
+| 200 | OK | 请求成功 / Request successful |
+| 201 | Created | 资源创建成功 / Resource created |
+| 400 | Bad Request | 请求参数错误 / Invalid request parameters |
+| 401 | Unauthorized | 未认证 / Not authenticated |
+| 403 | Forbidden | 无权限 / No permission |
+| 404 | Not Found | 资源不存在 / Resource not found |
+| 422 | Validation Error | 数据验证失败 / Data validation failed |
+| 500 | Internal Server Error | 服务器内部错误 / Internal server error |
+
+### 3.2 错误代码 | Error Codes
+
+| 错误代码 / Code | 说明 / Description |
+|----------------|-------------------|
+| `AUTHENTICATION_ERROR` | 认证失败 / Authentication failed |
+| `AUTHORIZATION_ERROR` | 授权失败 / Authorization failed |
+| `VALIDATION_ERROR` | 数据验证错误 / Validation error |
+| `RESOURCE_NOT_FOUND` | 资源不存在 / Resource not found |
+| `RESOURCE_CONFLICT` | 资源冲突 / Resource conflict |
+| `INTERNAL_ERROR` | 内部服务器错误 / Internal server error |
+
+---
+
+<a name="endpoints"></a>
+## 4. API 端点 | API Endpoints
+
+### 4.1 认证模块 | Authentication Module
+
+| 方法 / Method | 端点 / Endpoint | 描述 / Description |
+|--------------|----------------|-------------------|
+| POST | `/auth/register` | 用户注册 / User registration |
+| POST | `/auth/login` | 用户登录 / User login |
+| POST | `/auth/logout` | 用户登出 / User logout |
+| POST | `/auth/refresh` | 刷新令牌 / Refresh token |
+| GET | `/auth/me` | 获取当前用户 / Get current user |
+
+### 4.2 患者模块 | Patient Module
+
+| 方法 / Method | 端点 / Endpoint | 描述 / Description |
+|--------------|----------------|-------------------|
+| GET | `/patients` | 患者列表 / Patient list |
+| POST | `/patients` | 创建患者 / Create patient |
+| GET | `/patients/me` | 获取我的患者档案 / Get my patient profile |
+| PUT | `/patients/me` | 更新我的档案 / Update my profile |
+| GET | `/patients/{id}` | 获取患者详情 / Get patient details |
+
+### 4.3 AI 诊断模块 | AI Diagnosis Module
+
+| 方法 / Method | 端点 / Endpoint | 描述 / Description |
+|--------------|----------------|-------------------|
+| POST | `/ai/comprehensive-diagnosis` | 完整诊断 / Comprehensive diagnosis |
+| POST | `/ai/comprehensive-diagnosis-stream` | 流式完整诊断 / Streaming comprehensive diagnosis |
+| POST | `/ai/diagnose` | 简单诊断 / Simple diagnosis |
+| POST | `/ai/analyze` | 症状分析 / Symptom analysis |
+
+### 4.4 医疗记录模块 | Medical Records Module
+
+| 方法 / Method | 端点 / Endpoint | 描述 / Description |
+|--------------|----------------|-------------------|
+| GET | `/medical-cases` | 病例列表 / Case list |
+| POST | `/medical-cases` | 创建病例 / Create case |
+| GET | `/medical-cases/{id}` | 获取病例 / Get case |
+| PUT | `/medical-cases/{id}` | 更新病例 / Update case |
+| DELETE | `/medical-cases/{id}` | 删除病例 / Delete case |
+
+### 4.5 文档模块 | Document Module
+
+| 方法 / Method | 端点 / Endpoint | 描述 / Description |
+|--------------|----------------|-------------------|
+| POST | `/documents/upload` | 上传文件 / Upload file |
+| GET | `/documents/{id}` | 获取文档 / Get document |
+| POST | `/documents/{id}/extract` | 提取文本 / Extract text |
+| GET | `/documents/{id}/content` | 获取文档内容 / Get document content |
+| GET | `/documents/{id}/pii-status` | 获取 PII 清洗状态 / Get PII cleaning status |
+
+### 4.6 医生模块 | Doctor Module
+
+| 方法 / Method | 端点 / Endpoint | 描述 / Description |
+|--------------|----------------|-------------------|
+| GET | `/doctor/cases` | 获取医生的病例 / Get doctor's cases |
+| GET | `/doctor/cases/{id}` | 获取病例详情 / Get case details |
+| POST | `/doctor/cases/{id}/comments` | 添加评论 / Add comment |
+| GET | `/doctor/mentions` | 获取 @我的病例 / Get @my cases |
+
+### 4.7 分享模块 | Sharing Module
+
+| 方法 / Method | 端点 / Endpoint | 描述 / Description |
+|--------------|----------------|-------------------|
+| GET | `/sharing/doctors` | 搜索医生 / Search doctors |
+| POST | `/sharing/cases` | 分享病例 / Share case |
+| GET | `/sharing/cases/{id}` | 获取分享病例 / Get shared case |
+| POST | `/sharing/cases/{id}/comments` | 添加评论 / Add comment |
+| POST | `/sharing/cases/{id}/comments/{cid}/reply` | 回复评论 / Reply to comment |
+
+### 4.8 管理员模块 | Admin Module
+
+| 方法 / Method | 端点 / Endpoint | 描述 / Description |
+|--------------|----------------|-------------------|
+| GET | `/admin/dashboard/summary` | 仪表板摘要 / Dashboard summary |
+| GET | `/admin/doctors` | 医生列表 / Doctor list |
+| POST | `/admin/doctors/{id}/verify` | 审核医生 / Verify doctor |
+| GET | `/admin/operation-logs` | 操作日志 / Operation logs |
+| GET | `/admin/ai-diagnosis-logs` | AI 诊断日志 / AI diagnosis logs |
+| POST | `/admin/doctors/sync-verification` | 同步医生认证状态 / Sync doctor verification |
+
+#### 4.8.1 维护通知 | Maintenance Notification
+
+**发送维护通知** | **Send Maintenance Notification**
+
+```http
+POST /api/v1/admin/maintenance-notification
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "maintenance_time": "2026年4月1日 02:00 - 06:00",
+  "maintenance_content": "系统升级和数据库优化"
+}
+```
+
+**请求参数** | **Request Parameters:**
+
+| 参数 | 类型 | 必填 | 描述 |
+|------|------|------|------|
+| maintenance_time | string | 是 | 维护时间段，如"2026年4月1日 02:00 - 06:00" |
+| maintenance_content | string | 否 | 维护内容说明 |
+
+**响应示例** | **Response Example:**
+
+```json
+{
+  "message": "Maintenance notification sent successfully",
+  "total_users": 100,
+  "success_count": 98,
+  "failed_count": 2,
+  "failed_emails": ["bad@example.com"]
+}
+```
+
+**功能说明** | **Description:**
+- 仅管理员可访问
+- 向所有 role 为 patient 或 doctor 的用户发送维护通知邮件
+- 使用系统配置的 SMTP 邮件服务
+- 发送结果记录到管理员操作日志
+
+### 4.9 向量嵌入模块 | Vector Embedding Module
+
+| 方法 / Method | 端点 / Endpoint | 描述 / Description |
+|--------------|----------------|-------------------|
+| POST | `/vector-embedding/documents` | 向量化文档 / Vectorize document |
+| GET | `/vector-embedding/documents/{id}/status` | 获取向量化状态 / Get vectorization status |
+| POST | `/vector-embedding/knowledge-base` | 向量化知识库 / Vectorize knowledge base |
+| POST | `/vector-embedding/smart-rag` | 智能 RAG 检索 / Smart RAG retrieval |
+
+---
+
+<a name="data-models"></a>
+## 5. 数据模型 | Data Models
+
+### 5.1 用户模型 | User Model
+
+```json
+{
+  "id": "uuid",
+  "email": "user@example.com",
+  "full_name": "张三 | Zhang San",
+  "role": "patient",  // patient, doctor, admin
+  "is_active": true,
+  "is_verified": true,
+  "phone": "13800138000",
+  "created_at": "2025-02-01T10:00:00Z",
+  "updated_at": "2025-02-01T10:00:00Z"
+}
+```
+
+### 5.2 患者模型 | Patient Model
+
+```json
+{
+  "id": "uuid",
+  "user_id": "uuid",
+  "date_of_birth": "1990-01-01",
+  "gender": "male",  // male, female, other
+  "phone": "13800138000",
+  "address": "北京市朝阳区",
+  "emergency_contact_name": "李四",
+  "emergency_contact_phone": "13900139000",
+  "medical_record_number": "MR2024001",
+  "created_at": "2025-02-01T10:00:00Z"
+}
+```
+
+### 5.3 病例模型 | Medical Case Model
+
+```json
+{
+  "id": "uuid",
+  "patient_id": "uuid",
+  "disease_id": "uuid",
+  "title": "反复咳嗽、喘息",
+  "symptoms": "患者近一周反复咳嗽...",
+  "diagnosis": "支气管哮喘",
+  "severity": "moderate",  // mild, moderate, severe
+  "status": "active",
+  "created_at": "2025-02-01T10:00:00Z",
+  "updated_at": "2025-02-01T10:00:00Z"
+}
+```
+
+### 5.4 文档模型 | Document Model
+
+```json
+{
+  "id": "uuid",
+  "medical_case_id": "uuid",
+  "filename": "血常规报告.pdf",
+  "file_type": "pdf",
+  "file_size": 1024567,
+  "storage_type": "oss",  // local, oss
+  "storage_path": "documents/xxxx.pdf",
+  "extracted_content": "白细胞计数: 7.5...",
+  "pii_cleaned_content": "白细胞计数: 7.5...",
+  "pii_cleaning_status": "completed",  // pending, processing, completed, failed
+  "upload_status": "processed",  // pending, uploaded, processing, processed, failed
+  "created_at": "2025-02-01T10:00:00Z"
+}
+```
+
+### 5.5 AI 反馈模型 | AI Feedback Model
+
+```json
+{
+  "id": "uuid",
+  "medical_case_id": "uuid",
+  "diagnosis_result": "初步诊断：支气管哮喘急性发作期",
+  "confidence": 0.92,
+  "reasoning": "根据患者症状和检查结果...",
+  "suggestions": ["建议继续吸入激素治疗", "定期复查肺功能"],
+  "warnings": ["注意药物副作用"],
+  "follow_up_plan": "1周后复诊",
+  "model_used": "GLM-4.7-Flash",
+  "created_at": "2025-02-01T10:00:00Z"
+}
+```
+
+---
+
+<a name="examples"></a>
+## 6. 代码示例 | Code Examples
+
+### 6.1 完整工作流示例 | Complete Workflow Example
+
+```bash
+#!/bin/bash
+# 完整 API 调用示例 / Complete API call example
+
+BASE_URL="http://localhost:8000/api/v1"
+
+# 1. 用户注册 / User registration
+REGISTER_RESPONSE=$(curl -s -X POST "${BASE_URL}/auth/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "test@medicare.ai",
+    "password": "Test123456!",
+    "full_name": "测试用户 | Test User",
+    "role": "patient"
+  }')
+
+# 2. 用户登录 / User login
+LOGIN_RESPONSE=$(curl -s -X POST "${BASE_URL}/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "test@medicare.ai",
+    "password": "Test123456!",
+    "platform": "patient"
+  }')
+
+ACCESS_TOKEN=$(echo $LOGIN_RESPONSE | jq -r '.data.tokens.access_token')
+
+# 3. 获取当前用户 / Get current user
+curl -s "${BASE_URL}/auth/me" \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}"
+
+# 4. 创建病例 / Create case
+curl -s -X POST "${BASE_URL}/medical-cases" \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "咳嗽症状",
+    "symptoms": "反复咳嗽一周...",
+    "severity": "moderate"
+  }'
+
+# 5. AI 诊断 / AI diagnosis
+curl -s -X POST "${BASE_URL}/ai/comprehensive-diagnosis" \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symptoms": "反复咳嗽、喘息",
+    "severity": "moderate",
+    "language": "zh"
+  }'
+```
+
+### 6.2 Python 示例 | Python Example
+
+```python
+import requests
+
+BASE_URL = "http://localhost:8000/api/v1"
+
+# 登录 / Login
+login_response = requests.post(f"{BASE_URL}/auth/login", json={
+    "email": "test@medicare.ai",
+    "password": "Test123456!",
+    "platform": "patient"
+})
+tokens = login_response.json()["data"]["tokens"]
+access_token = tokens["access_token"]
+
+headers = {
+    "Authorization": f"Bearer {access_token}",
+    "Content-Type": "application/json"
+}
+
+# 获取患者列表 / Get patient list
+response = requests.get(f"{BASE_URL}/patients", headers=headers)
+patients = response.json()["data"]
+
+# AI 诊断 / AI diagnosis
+ai_response = requests.post(
+    f"{BASE_URL}/ai/comprehensive-diagnosis",
+    headers=headers,
+    json={
+        "symptoms": "反复咳嗽一周",
+        "severity": "moderate",
+        "language": "zh"
+    }
+)
+diagnosis = ai_response.json()["data"]
+print(f"诊断结果 / Diagnosis: {diagnosis['diagnosis_result']}")
+```
+
+### 6.3 JavaScript 示例 | JavaScript Example
+
+```javascript
+const BASE_URL = 'http://localhost:8000/api/v1';
+
+// 登录 / Login
+async function login(email, password, platform) {
+  const response = await fetch(`${BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, platform })
+  });
+  const data = await response.json();
+  return data.data.tokens.access_token;
+}
+
+// API 调用 / API call
+async function apiCall(endpoint, options = {}) {
+  const token = localStorage.getItem('access_token');
+  const response = await fetch(`${BASE_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...options.headers
+    }
+  });
+  return response.json();
+}
+
+// 使用示例 / Usage example
+async function example() {
+  const token = await login('test@medicare.ai', 'Test123456!', 'patient');
+  localStorage.setItem('access_token', token);
+  
+  // 获取病例列表 / Get case list
+  const cases = await apiCall('/medical-cases');
+  console.log('病例列表 / Cases:', cases);
+  
+  // AI 诊断 / AI diagnosis
+  const diagnosis = await apiCall('/ai/comprehensive-diagnosis', {
+    method: 'POST',
+    body: JSON.stringify({
+      symptoms: '反复咳嗽一周',
+      severity: 'moderate',
+      language: 'zh'
+    })
+  });
+  console.log('诊断结果 / Diagnosis:', diagnosis);
+}
+```
+
+---
+
+## 参考资源 | Reference Resources
+
+- [OpenAPI/Swagger Documentation](http://localhost:8000/api/docs) - 交互式 API 文档 / Interactive API docs
+- [ReDoc Documentation](http://localhost:8000/api/redoc) - 替代 API 文档格式 / Alternative API docs format
+- [FastAPI Documentation](https://fastapi.tiangolo.com/) - FastAPI 框架文档 / FastAPI framework docs
+
+---
+
+**文档版本 / Document Version**: 2.1.0  
+**最后更新 / Last Updated**: 2026-02-23  
+**作者 / Author**: 苏业钦 (Su Yeqin)

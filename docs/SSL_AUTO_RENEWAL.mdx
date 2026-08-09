@@ -1,0 +1,467 @@
+{/*
+  SSL Certificate Auto-Renewal Guide | SSL 证书自动续期指南
+  
+  Let's Encrypt SSL 证书自动续期完整配置说明
+  Complete configuration guide for Let's Encrypt SSL auto-renewal
+  
+  版本 / Version: 1.0.0
+  更新日期 / Updated: 2026-03-05
+*/}
+
+
+> **⚠️ 重要提示 / Important Notice**
+> 
+> 本文档描述如何配置 MediCareAI 生产环境的 SSL 证书自动续期。
+> 证书到期前 30 天内会自动续期，无需手动干预。
+>
+> This guide describes how to configure SSL certificate auto-renewal for MediCareAI production environment.
+> Certificates will be automatically renewed within 30 days before expiration without manual intervention.
+
+---
+
+## 📋 目录 | Table of Contents
+
+- [概述 | Overview](#overview)
+- [前提条件 | Prerequisites](#prerequisites)
+- [自动续期原理 | How Auto-Renewal Works](#how-it-works)
+- [配置步骤 | Configuration Steps](#configuration)
+- [手动操作 | Manual Operations](#manual-operations)
+- [故障排除 | Troubleshooting](#troubleshooting)
+- [监控与日志 | Monitoring and Logging](#monitoring)
+
+---
+
+<a name="overview"></a>
+## 🎯 概述 | Overview
+
+MediCareAI 使用 Let's Encrypt 提供的免费 SSL 证书。Let's Encrypt 证书有效期为 **90 天**，需要定期续期。
+
+本方案使用 `certbot` + `crontab` 实现完全自动化的证书续期：
+
+- ✅ 每两周自动检查一次证书状态
+- ✅ 到期前 30 天内自动续期
+- ✅ 自动部署新证书到项目目录
+- ✅ 自动重启 nginx 加载新证书
+- ✅ 完整的日志记录和备份机制
+
+---
+
+<a name="prerequisites"></a>
+## 📌 前提条件 | Prerequisites
+
+### 1. 已安装 certbot
+
+```bash
+# 检查 certbot 是否已安装
+which certbot
+
+# 如未安装，使用以下命令安装
+# Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install certbot
+
+# CentOS/RHEL
+sudo yum install certbot
+```
+
+### 2. 已有 Let's Encrypt 证书
+
+确保证书已通过 certbot 申请：
+
+```bash
+# 查看现有证书
+sudo certbot certificates
+
+# 示例输出：
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Found the following certs:
+#   Certificate Name: openmedicareai.life-0001
+#   Expiry Date: 2026-05-31 07:55:47+00:00 (VALID: 87 days)
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+```
+
+### 3. 项目目录结构
+
+确保项目目录包含以下路径：
+```
+/home/houge/MediCareAI/
+├── docker/
+│   └── nginx/
+│       └── ssl/
+│           ├── cert.pem      # 证书文件
+│           └── key.pem       # 私钥文件
+```
+
+---
+
+<a name="how-it-works"></a>
+## 🔧 自动续期原理 | How Auto-Renewal Works
+
+### 工作流程图
+
+```
+┌─────────────────┐
+│   Crontab       │  每月 1 号和 15 号凌晨 2:00
+│  (定时任务)      │  触发自动续期脚本
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  renew-ssl.sh   │  执行续期检查
+│   (续期脚本)     │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐     ┌─────────────────┐
+│  certbot renew  │────▶│  检查证书有效期   │
+│   (续期命令)     │     │  是否需要续期？   │
+└─────────────────┘     └────────┬────────┘
+                                 │
+                    ┌────────────┴────────────┐
+                    │                         │
+                    ▼                         ▼
+           ┌──────────────┐          ┌──────────────┐
+           │  不需要续期   │          │   需要续期    │
+           │  记录日志退出 │          │  执行续期     │
+           └──────────────┘          └──────┬───────┘
+                                             │
+                                             ▼
+                                    ┌──────────────┐
+                                    │  备份旧证书   │
+                                    │  到 backup/  │
+                                    └──────┬───────┘
+                                           │
+                                           ▼
+                                    ┌──────────────┐
+                                    │ 复制新证书到  │
+                                    │ 项目 ssl/ 目录│
+                                    └──────┬───────┘
+                                           │
+                                           ▼
+                                    ┌──────────────┐
+                                    │ 重启 nginx   │
+                                    │ 加载新证书    │
+                                    └──────┬───────┘
+                                           │
+                                           ▼
+                                    ┌──────────────┐
+                                    │ 记录成功日志  │
+                                    └──────────────┘
+```
+
+### 关键特性
+
+| 特性 | 说明 |
+|------|------|
+| **智能续期** | certbot 只在证书到期前 30 天内实际续期 |
+| **自动备份** | 每次更新前自动备份旧证书到 `backup/` 目录 |
+| **原子操作** | 证书更新和 nginx 重启一气呵成，最小化服务中断 |
+| **完整日志** | 每次执行都有详细日志，便于审计和故障排查 |
+| **权限控制** | 使用 sudo 运行 certbot，确保权限正确 |
+
+---
+
+<a name="configuration"></a>
+## ⚙️ 配置步骤 | Configuration Steps
+
+### 步骤 1: 创建续期脚本
+
+创建 `/home/houge/renew-ssl.sh` 文件：
+
+```bash
+#!/bin/bash
+# SSL Certificate Auto-Renewal Script for MediCareAI
+
+set -e
+
+DOMAIN="openmedicareai.life"
+CERT_DIR="/etc/letsencrypt/live/openmedicareai.life-0001"
+PROJECT_SSL_DIR="/home/houge/MediCareAI/docker/nginx/ssl"
+LOG_FILE="/home/houge/ssl-renewal.log"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
+
+log "========================================"
+log "Starting SSL certificate renewal check"
+log "========================================"
+
+# Check current certificate expiry
+current_cert_date=$(openssl x509 -in "$PROJECT_SSL_DIR/cert.pem" -noout -enddate | cut -d= -f2)
+log "Current certificate expiry: $current_cert_date"
+
+# Run certbot renew (only renews if within 30 days of expiry)
+log "Running certbot renew..."
+if sudo certbot renew --quiet; then
+    log "Certbot renew completed successfully"
+    
+    # Check if certificate was actually renewed (file updated)
+    if [ "$CERT_DIR/fullchain.pem" -nt "$PROJECT_SSL_DIR/cert.pem" ]; then
+        log "New certificate detected! Updating project certificates..."
+        
+        # Backup old certificates
+        BACKUP_DIR="$PROJECT_SSL_DIR/backup/$(date +%Y%m%d_%H%M%S)"
+        mkdir -p "$BACKUP_DIR"
+        cp "$PROJECT_SSL_DIR/cert.pem" "$BACKUP_DIR/" 2>/dev/null || true
+        cp "$PROJECT_SSL_DIR/key.pem" "$BACKUP_DIR/" 2>/dev/null || true
+        log "Old certificates backed up to: $BACKUP_DIR"
+        
+        # Copy new certificates to project directory
+        cp "$CERT_DIR/fullchain.pem" "$PROJECT_SSL_DIR/cert.pem"
+        cp "$CERT_DIR/privkey.pem" "$PROJECT_SSL_DIR/key.pem"
+        
+        # Set correct permissions
+        chmod 644 "$PROJECT_SSL_DIR/cert.pem"
+        chmod 600 "$PROJECT_SSL_DIR/key.pem"
+        log "New certificates copied with permissions: cert.pem (644), key.pem (600)"
+        
+        # Validate new certificate
+        if openssl x509 -in "$PROJECT_SSL_DIR/cert.pem" -noout -dates > /dev/null 2>&1; then
+            new_cert_date=$(openssl x509 -in "$PROJECT_SSL_DIR/cert.pem" -noout -enddate | cut -d= -f2)
+            log "New certificate validated. New expiry: $new_cert_date"
+        else
+            log "ERROR: Certificate validation failed!"
+            exit 1
+        fi
+        
+        # Restart nginx container to reload certificates
+        log "Restarting nginx container..."
+        cd /home/houge/MediCareAI
+        if docker-compose restart nginx; then
+            log "Nginx restarted successfully"
+        else
+            log "ERROR: Failed to restart nginx!"
+            exit 1
+        fi
+        
+        log "========================================"
+        log "SSL renewal and deployment completed!"
+        log "========================================"
+    else
+        log "No certificate renewal needed (current cert is still valid)"
+    fi
+else
+    log "ERROR: Certbot renew failed!"
+    exit 1
+fi
+```
+
+### 步骤 2: 设置脚本权限
+
+```bash
+chmod +x /home/houge/renew-ssl.sh
+```
+
+### 步骤 3: 配置定时任务
+
+编辑 crontab：
+
+```bash
+crontab -e
+```
+
+添加以下行：
+
+```bash
+# MediCareAI SSL Certificate Auto-Renewal
+# Runs twice a month (1st and 15th) at 2:00 AM
+# 每月1号和15号凌晨2点自动检查并续期 SSL 证书
+
+0 2 1,15 * * /home/houge/renew-ssl.sh >> /home/houge/ssl-renewal.log 2>&1
+```
+
+### 步骤 4: 验证配置
+
+手动运行脚本测试：
+
+```bash
+/home/houge/renew-ssl.sh
+```
+
+预期输出：
+```
+[2026-03-05 09:33:57] ========================================
+[2026-03-05 09:33:57] Starting SSL certificate renewal check
+[2026-03-05 09:33:57] ========================================
+[2026-03-05 09:33:57] Current certificate expiry: May 31 07:01:02 2026 GMT
+[2026-03-05 09:33:57] Running certbot renew...
+[2026-03-05 09:33:59] Certbot renew completed successfully
+[2026-03-05 09:33:59] No certificate renewal needed (current cert is still valid)
+```
+
+---
+
+<a name="manual-operations"></a>
+## 🖥️ 手动操作 | Manual Operations
+
+### 查看证书状态
+
+```bash
+# 查看项目证书信息
+openssl x509 -in /home/houge/MediCareAI/docker/nginx/ssl/cert.pem -noout -dates -subject
+
+# 查看 Let's Encrypt 证书列表
+sudo certbot certificates
+```
+
+### 强制续期（测试用）
+
+```bash
+# 强制续期（无视30天限制）
+sudo certbot renew --force-renewal
+
+# 然后手动运行部署脚本
+/home/houge/renew-ssl.sh
+```
+
+### 查看续期日志
+
+```bash
+# 查看最新日志
+tail -f /home/houge/ssl-renewal.log
+
+# 查看完整日志
+cat /home/houge/ssl-renewal.log
+```
+
+### 备份证书
+
+脚本会自动备份旧证书到 `backup/` 目录，你也可以手动备份：
+
+```bash
+BACKUP_DIR="/home/houge/MediCareAI/docker/nginx/ssl/backup/$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+cp /home/houge/MediCareAI/docker/nginx/ssl/*.pem "$BACKUP_DIR/"
+echo "Certificates backed up to: $BACKUP_DIR"
+```
+
+---
+
+<a name="troubleshooting"></a>
+## 🔧 故障排除 | Troubleshooting
+
+### 问题 1: Permission denied
+
+**症状**：
+```
+[Errno 13] Permission denied: '/var/log/letsencrypt/.certbot.lock'
+```
+
+**原因**：certbot 需要 root 权限
+
+**解决**：确保脚本中使用 `sudo certbot renew`
+
+### 问题 2: 证书文件未找到
+
+**症状**：
+```
+ERROR: Certificate files not found at /etc/letsencrypt/live/...
+```
+
+**原因**：证书名称或路径不正确
+
+**解决**：
+```bash
+# 检查实际的证书路径
+sudo certbot certificates
+
+# 更新脚本中的 CERT_DIR 变量
+CERT_DIR="/etc/letsencrypt/live/你的实际证书名称"
+```
+
+### 问题 3: nginx 重启失败
+
+**症状**：
+```
+ERROR: Failed to restart nginx!
+```
+
+**原因**：
+- Docker 未运行
+- docker-compose 命令失败
+- 项目目录不在预期位置
+
+**解决**：
+```bash
+# 检查 Docker 状态
+sudo systemctl status docker
+
+# 手动重启 nginx
+cd /home/houge/MediCareAI
+docker-compose restart nginx
+```
+
+### 问题 4: 证书验证失败
+
+**症状**：
+```
+ERROR: Certificate validation failed!
+```
+
+**原因**：复制的证书文件损坏或不完整
+
+**解决**：
+```bash
+# 检查证书文件
+openssl x509 -in /home/houge/MediCareAI/docker/nginx/ssl/cert.pem -noout -text
+
+# 如果损坏，从 backup 目录恢复最新的备份
+LATEST_BACKUP=$(ls -td /home/houge/MediCareAI/docker/nginx/ssl/backup/*/ | head -1)
+cp "$LATEST_BACKUP"/*.pem /home/houge/MediCareAI/docker/nginx/ssl/
+docker-compose restart nginx
+```
+
+---
+
+<a name="monitoring"></a>
+## 📊 监控与日志 | Monitoring and Logging
+
+### 日志文件位置
+
+| 文件 | 路径 | 说明 |
+|------|------|------|
+| 续期日志 | `/home/houge/ssl-renewal.log` | 每次续期脚本的执行记录 |
+| certbot 日志 | `/var/log/letsencrypt/` | certbot 详细日志 |
+| 证书备份 | `/home/houge/MediCareAI/docker/nginx/ssl/backup/` | 旧证书备份目录 |
+
+### 监控检查清单
+
+- [ ] 每月检查 `/home/houge/ssl-renewal.log` 确保续期正常执行
+- [ ] 在证书到期前 15 天手动检查续期状态
+- [ ] 确保证书备份目录有足够的磁盘空间
+- [ ] 监控 HTTPS 网站可访问性
+
+### 设置证书到期提醒
+
+可以添加一个额外的 crontab 任务，在证书到期前发送提醒：
+
+```bash
+# 每天检查证书有效期，如果少于 15 天则发送提醒（需要配置邮件）
+0 9 * * * /home/houge/check-ssl-expiry.sh
+```
+
+---
+
+## 📚 参考文档 | References
+
+- [Let's Encrypt 官方文档](https://letsencrypt.org/docs/)
+- [Certbot 用户指南](https://eff-certbot.readthedocs.io/)
+- [PRODUCTION_DEPLOYMENT.mdx](./PRODUCTION_DEPLOYMENT.mdx) - 生产环境部署指南
+- [TROUBLESHOOTING.mdx](./TROUBLESHOOTING.mdx) - 故障排除指南
+
+---
+
+## 🆘 需要帮助？
+
+如果在配置过程中遇到问题：
+
+1. 查看续期日志：`cat /home/houge/ssl-renewal.log`
+2. 检查 certbot 状态：`sudo certbot certificates`
+3. 手动测试续期：`sudo certbot renew --dry-run`
+4. 参考 [TROUBLESHOOTING.mdx](./TROUBLESHOOTING.mdx) 故障排除指南
+
+---
+
+**创建时间**: 2026-03-05  
+**适用版本**: MediCareAI v3.1.3+

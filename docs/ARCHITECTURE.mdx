@@ -1,0 +1,620 @@
+{/*
+  System Architecture | 系统架构
+  
+  MediCare_AI 系统架构设计文档 / System Architecture Design Document
+  中文在前，英文在后 | Chinese first, English second
+*/}
+
+# 系统架构 | System Architecture
+
+> **MediCare_AI** 系统架构设计文档 / System Architecture Design Document  
+> **版本 / Version:** 2.2.0 | **更新日期 / Last Updated:** 2026-03-05
+
+---
+
+## 📋 目录 | Table of Contents
+
+1. [概述 | Overview](#overview)
+2. [架构图 | Architecture Diagram](#architecture-diagram)
+3. [组件详情 | Component Details](#component-details)
+4. [数据流 | Data Flow](#data-flow)
+5. [数据库设计 | Database Design](#database-design)
+6. [安全架构 | Security Architecture](#security-architecture)
+7. [可扩展性 | Scalability](#scalability)
+
+---
+
+<a name="overview"></a>
+## 1. 概述 | Overview
+
+### 1.1 目的 | Purpose
+
+本文档描述了 MediCare_AI 系统的架构，这是一个结合 AI 智能诊断和全面患者管理的智能疾病管理平台。  
+This document describes the architecture of the MediCare_AI system, an intelligent disease management platform combining AI-powered diagnosis with comprehensive patient management.
+
+### 1.2 设计目标 | Design Goals
+
+| 目标 / Goal | 描述 / Description | 中文描述 |
+|------------|-------------------|----------|
+| **可扩展性 / Scalability** | 处理不断增长的用户和数据 / Handle growing user base and data | 可扩展性 |
+| **可靠性 / Reliability** | 通过适当监控实现 99.9% 正常运行时间 / 99.9% uptime with proper monitoring | 可靠性 |
+| **安全性 / Security** | 符合 HIPAA 的数据保护 / HIPAA-compliant data protection | 安全性 |
+| **性能 / Performance** | API 响应时间小于 2 秒 / < 2s API response time | 性能 |
+| **可维护性 / Maintainability** | 代码整洁，文档完善 / Clean code with comprehensive docs | 可维护性 |
+
+### 1.3 技术栈 | Technology Stack
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    前端层 / Frontend Layer                    │
+├─────────────────────────────────────────────────────────────┤
+│  React 18 + TypeScript + Vite                               │
+│  • Material-UI v6 for component library                     │
+│  • React Query v5 for data fetching                         │
+│  • Zustand for state management                             │
+│  • React Router v6 for routing                              │
+│  • Build output: npm run build → build/                     │
+│                                                              │
+│  Android App (Jetpack Compose + Kotlin)                     │
+│  • MVVM architecture with ViewModel                         │
+│  • Ktor client for API communication                        │
+│  • Hilt for dependency injection                            │
+│  • Material Design 3 components                             │
+│                                                              │
+│  ⚠️ iOS App: 开发计划暂不考虑 / Development on hold         │
+│     当前重点：Web端优化 + Android App优化                   │
+│     Current Focus: Web optimization + Android App           │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    API 网关层 / API Gateway                   │
+├─────────────────────────────────────────────────────────────┤
+│  Nginx (反向代理 / Reverse Proxy)                            │
+│  • SSL/TLS 终端 / SSL/TLS termination                        │
+│  • React SPA 静态资源 / React SPA static assets            │
+│  • 负载均衡 / Load balancing                                 │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   后端层 / Backend Layer                      │
+├─────────────────────────────────────────────────────────────┤
+│  FastAPI (Python 3.12)                                      │
+│  • 异步 SQLAlchemy ORM / Async SQLAlchemy ORM               │
+│  • JWT 认证 / JWT authentication                            │
+│  • 自动 OpenAPI 文档 / Auto OpenAPI docs                    │
+│  • Pydantic 数据验证 / Pydantic validation                  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        │                     │                     │
+        ▼                     ▼                     ▼
+┌───────────────┐   ┌─────────────────┐   ┌─────────────────┐
+│  PostgreSQL   │   │      Redis      │   │  Alibaba Cloud  │
+│   数据库       │   │     缓存        │   │      OSS        │
+│ (数据持久化)   │   │  (会话/缓存)     │   │  (文档存储)      │
+│  + pgvector   │   │                 │   │                 │
+└───────────────┘   └─────────────────┘   └─────────────────┘
+        │                     │                     │
+        └─────────────────────┼─────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│              AI 服务层 / AI Service Layer                     │
+├─────────────────────────────────────────────────────────────┤
+│  • OpenAI 兼容 API (GLM-4.7-Flash, GPT)                      │
+│  • MinerU 文档提取 / MinerU document extraction               │
+│  • Qwen 向量嵌入 / Qwen vector embeddings                     │
+│  • Smart RAG 检索 / Smart RAG retrieval                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+<a name="architecture-diagram"></a>
+## 2. 架构图 | Architecture Diagram
+
+### 2.1 系统整体架构 | System Overall Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        用户 / Users                              │
+│    患者端 / Patient    医生端 / Doctor    管理员端 / Admin         │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     Nginx 反向代理                               │
+│         (SSL/TLS, React SPA, 反向代理, 负载均衡)                   │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+            ┌───────────────┼───────────────┐
+            │               │               │
+            ▼               ▼               ▼
+┌───────────────┐   ┌───────────────┐   ┌───────────────┐
+│   前端页面     │   │   后端 API    │   │   API 文档    │
+│(React+TS+Vite)│   │   (FastAPI)   │   │  (Swagger)    │
+└───────────────┘   └───────┬───────┘   └───────────────┘
+                            │
+        ┌───────────────────┼───────────────────┐
+        │                   │                   │
+        ▼                   ▼                   ▼
+┌───────────────┐   ┌───────────────┐   ┌───────────────┐
+│  PostgreSQL   │   │     Redis     │   │    MinerU     │
+│   数据库       │   │     缓存      │   │    API        │
+│  (主数据)      │   │  (会话/缓存)   │   │  (文档提取)    │
+└───────────────┘   └───────────────┘   └───────────────┘
+        │                   │                   │
+        └───────────────────┼───────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│           阿里云 OSS (文档存储) / Alibaba Cloud OSS               │
+│                    (安全文档存储 / Secure document storage)       │
+└─────────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│        Qwen API (向量嵌入) / Qwen API (Vector Embeddings)        │
+│              (RAG 知识检索 / RAG knowledge retrieval)            │
+└─────────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│         AI 大模型 (OpenAI 兼容) / AI LLM (OpenAI-compatible)     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+<a name="component-details"></a>
+## 3. 组件详情 | Component Details
+
+### 3.1 前端层 | Frontend Layer
+
+**技术 / Technologies:**
+- React 18 with TypeScript
+- Vite build tool
+- Material-UI (MUI) v6 component library
+- React Query v5 for server state management
+- Zustand for client state management
+- React Router v6 for SPA routing
+- React Markdown for document rendering
+- Responsive design with CSS-in-JS
+
+**三端平台 / Three Platforms (React Components):**
+
+#### 患者端 / Patient Platform
+- `pages/patient/Dashboard.tsx` - 患者仪表板 / Patient dashboard
+- `pages/patient/SymptomSubmit.tsx` - 症状提交 / Symptom submission
+- `pages/patient/MedicalRecords.tsx` - 诊疗记录列表 / Medical records list
+- `pages/patient/MedicalRecordDetail.tsx` - 病例详情 / Case detail
+- `pages/patient/Profile.tsx` - 用户档案 / User profile
+
+#### 医生端 / Doctor Platform
+- `pages/doctor/Dashboard.tsx` - 医生仪表板 / Doctor dashboard
+- `pages/doctor/Cases.tsx` - 病例管理 / Case management
+- `pages/doctor/CaseDetail.tsx` - 病例详情 / Case detail
+- `pages/doctor/Mentions.tsx` - @我的病例 /@My cases
+- `pages/doctor/Messages.tsx` - 消息中心 / Messages
+- `pages/doctor/Profile.tsx` - 医生档案 / Doctor profile
+
+#### 管理员端 / Admin Platform
+- `pages/admin/Dashboard.tsx` - 管理仪表板 / Admin dashboard
+- `pages/admin/Doctors.tsx` - 医生认证 / Doctor verification
+- `pages/admin/KnowledgeBase.tsx` - 知识库管理 / Knowledge base management
+- `pages/admin/AIModels.tsx` - AI 模型配置 / AI model configuration
+- `pages/admin/Logs.tsx` - 审计日志 / Audit logs
+- `pages/admin/Messages.tsx` - 消息管理 / Message management
+
+### 3.2 API 网关层 | API Gateway Layer
+
+**Nginx 职责 / Nginx Responsibilities:**
+- SSL/TLS 终端 / SSL/TLS termination
+- React SPA 静态资源服务 / React SPA static assets serving
+- 反向代理到后端 / Reverse proxy to backend
+- 负载均衡 / Load balancing (多实例时)
+- 速率限制 / Rate limiting
+
+### 3.3 后端层 | Backend Layer
+
+**FastAPI 特性 / FastAPI Features:**
+- 异步处理 / Async processing
+- 自动 API 文档生成 / Auto API doc generation
+- Pydantic 数据验证 / Pydantic data validation
+- 依赖注入系统 / Dependency injection system
+- JWT 认证 / JWT authentication
+
+**核心模块 / Core Modules:**
+
+```
+backend/app/
+├── api/
+│   └── api_v1/
+│       ├── endpoints/          # API 端点 / API endpoints
+│       │   ├── auth.py         # 认证 / Authentication
+│       │   ├── patients.py     # 患者管理 / Patient management
+│       │   ├── ai.py           # AI 诊断 / AI diagnosis
+│       │   ├── medical_cases.py # 病例 / Medical cases
+│       │   ├── documents.py    # 文档 / Documents
+│       │   ├── admin.py        # 管理 / Admin
+│       │   ├── doctor.py       # 医生 / Doctor
+│       │   └── sharing.py      # 分享 / Sharing
+│       └── api.py              # 路由聚合 / Router aggregation
+├── core/                       # 核心配置 / Core config
+│   ├── config.py               # 应用配置 / App config
+│   ├── security.py             # 安全 / Security
+│   └── deps.py                 # 依赖 / Dependencies
+├── models/                     # 数据库模型 / DB models
+│   └── models.py               # SQLAlchemy 模型 / SQLAlchemy models
+├── schemas/                    # Pydantic 模式 / Pydantic schemas
+├── services/                   # 业务逻辑 / Business logic
+│   ├── ai_service.py           # AI 服务 / AI service
+│   ├── vector_embedding_service.py  # 向量嵌入 / Vector embedding
+│   ├── kb_vectorization_service.py  # 知识库向量化 / KB vectorization
+│   ├── smart_rag_selector.py   # 智能 RAG / Smart RAG
+│   ├── pii_cleaner_service.py  # PII 清洗 / PII cleaning
+│   └── oss_service.py          # OSS 服务 / OSS service
+└── main.py                     # 应用入口 / App entry
+```
+
+### 3.4 数据层 | Data Layer
+
+#### PostgreSQL 数据库 | PostgreSQL Database
+
+**主要表 / Main Tables:**
+- `users` - 用户 / Users
+- `patients` - 患者 / Patients
+- `medical_cases` - 病例 / Medical cases
+- `medical_documents` - 文档 / Documents
+- `ai_feedbacks` - AI 反馈 / AI feedbacks
+- `vector_embeddings` - 向量嵌入 / Vector embeddings
+- `doctor_verifications` - 医生认证 / Doctor verifications
+- `shared_medical_cases` - 分享病例 / Shared cases
+- `doctor_case_comments` - 医生评论 / Doctor comments
+- `case_comment_replies` - 患者回复 / Patient replies
+
+**pgvector 扩展 / pgvector Extension:**
+- 存储文档向量 / Store document vectors
+- 相似性搜索 / Similarity search
+- 支持余弦相似度 / Support cosine similarity
+
+#### Redis 缓存 | Redis Cache
+
+**用途 / Uses:**
+- 用户会话存储 / User session storage
+- API 响应缓存 / API response caching
+- 速率限制计数器 / Rate limiting counters
+- 实时数据统计 / Real-time statistics
+
+### 3.5 AI 服务层 | AI Service Layer
+
+#### AI 诊断服务 | AI Diagnosis Service
+
+**流程 / Flow:**
+1. 接收患者症状和文档 / Receive patient symptoms and documents
+2. 检索相关医疗指南 / Retrieve relevant medical guidelines (RAG)
+3. 构建提示词 / Construct prompt
+4. 调用 AI 模型 / Call AI model
+5. 解析响应 / Parse response
+6. 返回结构化诊断 / Return structured diagnosis
+
+#### MinerU 文档提取 | MinerU Document Extraction
+
+**功能 / Functions:**
+- PDF 文本提取 / PDF text extraction
+- 图片 OCR / Image OCR
+- 表格识别 / Table recognition
+- 结构化数据输出 / Structured data output
+
+#### RAG (检索增强生成) | RAG (Retrieval-Augmented Generation)
+
+**组件 / Components:**
+- **文档向量化 / Document Vectorization**: Qwen API 生成嵌入 / Qwen API generates embeddings
+- **向量存储 / Vector Storage**: PostgreSQL + pgvector
+- **相似性搜索 / Similarity Search**: 余弦相似度 / Cosine similarity
+- **上下文构建 / Context Building**: 动态检索相关指南 / Dynamically retrieve relevant guidelines
+
+---
+
+<a name="data-flow"></a>
+## 4. 数据流 | Data Flow
+
+### 4.1 AI 诊断流程 | AI Diagnosis Flow
+
+```
+用户提交症状 / User submits symptoms
+         │
+         ▼
+┌─────────────────────┐
+│ 1. 接收请求          │
+│ Receive request     │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ 2. 验证用户          │
+│ Validate user       │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐     ┌──────────────────┐
+│ 3. 处理文档          │────▶│ MinerU 提取      │
+│ Process documents   │     │ MinerU extraction│
+└──────────┬──────────┘     └──────────────────┘
+           │
+           ▼
+┌─────────────────────┐     ┌──────────────────┐
+│ 4. RAG 检索          │────▶│ 向量数据库查询    │
+│ RAG retrieval       │     │ Vector DB query  │
+└──────────┬──────────┘     └──────────────────┘
+           │
+           ▼
+┌─────────────────────┐     ┌──────────────────┐
+│ 5. 构建提示词        │────▶│ 症状 + 文档内容   │
+│ Build prompt        │     │ + 知识库指南      │
+└──────────┬──────────┘     └──────────────────┘
+           │
+           ▼
+┌─────────────────────┐     ┌──────────────────┐
+│ 6. 调用 AI 模型      │────▶│ OpenAI 兼容 API  │
+│ Call AI model       │     │ OpenAI-compatible│
+└──────────┬──────────┘     └──────────────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ 7. 解析响应          │
+│ Parse response      │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ 8. 保存结果          │
+│ Save results        │
+└──────────┬──────────┘
+           │
+           ▼
+返回诊断结果 / Return diagnosis
+```
+
+### 4.2 医患沟通流程 | Patient-Doctor Communication Flow
+
+```
+患者提交病例并 @医生 / Patient submits case and @doctor
+         │
+         ▼
+┌─────────────────────┐
+│ 1. 创建分享病例      │
+│ Create shared case  │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ 2. 发送通知给医生    │
+│ Notify doctor       │
+└──────────┬──────────┘
+           │
+           ▼
+医生查看 @我的病例 / Doctor views @my cases
+           │
+           ▼
+┌─────────────────────┐
+│ 3. 医生添加评论      │
+│ Doctor adds comment │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ 4. 通知患者          │
+│ Notify patient      │
+└──────────┬──────────┘
+           │
+           ▼
+患者回复医生评论 / Patient replies to doctor comment
+           │
+           ▼
+┌─────────────────────┐
+│ 5. 通知医生          │
+│ Notify doctor       │
+└─────────────────────┘
+```
+
+---
+
+<a name="database-design"></a>
+## 5. 数据库设计 | Database Design
+
+### 5.1 实体关系图 | Entity Relationship Diagram
+
+```
+┌─────────────┐       ┌─────────────┐       ┌─────────────┐
+│    users    │       │   patients  │       │medical_cases│
+├─────────────┤       ├─────────────┤       ├─────────────┤
+│ id (PK)     │──┐    │ id (PK)     │──┐    │ id (PK)     │
+│ email       │  │    │ user_id(FK) │◀─┘    │ patient_id  │
+│ password    │  │    │ phone       │       │ disease_id  │
+│ full_name   │  │    │ address     │       │ symptoms    │
+│ role        │  │    │ birth_date  │       │ diagnosis   │
+│ is_verified │  │    └─────────────┘       │ severity    │
+└─────────────┘  │           │              └──────┬──────┘
+                 │           │                     │
+                 │           │                     │
+                 │    ┌──────┴──────┐              │
+                 │    │             │              │
+                 │    ▼             ▼              ▼
+                 │ ┌─────────┐  ┌─────────────┐  ┌─────────────┐
+                 └▶│doctors  │  │follow_ups   │  │medical_docs │
+                   ├─────────┤  ├─────────────┤  ├─────────────┤
+                   │user_id  │  │case_id      │  │case_id      │
+                   │hospital │  │next_date    │  │filename     │
+                   │dept     │  │status       │  │extracted    │
+                   │verified │  └─────────────┘  │pii_cleaned  │
+                   └─────────┘                   └─────────────┘
+```
+
+### 5.2 核心表结构 | Core Table Structures
+
+#### users 表 / users Table
+```sql
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    full_name VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL DEFAULT 'patient',  -- patient, doctor, admin
+    phone VARCHAR(50),
+    is_active BOOLEAN DEFAULT true,
+    is_verified BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE
+);
+```
+
+#### medical_documents 表 / medical_documents Table
+```sql
+CREATE TABLE medical_documents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    medical_case_id UUID REFERENCES medical_cases(id),
+    filename VARCHAR(500) NOT NULL,
+    file_type VARCHAR(50),
+    file_size BIGINT,
+    storage_type VARCHAR(50) DEFAULT 'local',  -- local, oss
+    storage_path VARCHAR(1000),
+    extracted_content TEXT,
+    pii_cleaned_content TEXT,
+    pii_cleaning_status VARCHAR(50) DEFAULT 'pending',
+    upload_status VARCHAR(50) DEFAULT 'pending',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### vector_embeddings 表 / vector_embeddings Table
+```sql
+CREATE TABLE vector_embeddings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    document_id UUID REFERENCES medical_documents(id),
+    knowledge_base_id UUID,
+    embedding vector(1536),  -- Qwen embedding dimension
+    chunk_index INTEGER,
+    chunk_text TEXT,
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 创建相似性搜索索引 / Create similarity search index
+CREATE INDEX ON vector_embeddings 
+USING ivfflat (embedding vector_cosine_ops);
+```
+
+---
+
+<a name="security-architecture"></a>
+## 6. 安全架构 | Security Architecture
+
+### 6.1 认证与授权 | Authentication & Authorization
+
+**JWT 认证流程 / JWT Authentication Flow:**
+```
+┌─────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────┐
+│  Client │────▶│   Login     │────▶│   Verify    │────▶│ Generate│
+│         │     │   Endpoint  │     │ Credentials │     │  JWT    │
+└─────────┘     └─────────────┘     └─────────────┘     └────┬────┘
+                                                              │
+                                                              ▼
+┌─────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────┐
+│  Client │◀────│   Validate  │◀────│   Decode    │◀────│  JWT    │
+│         │     │    JWT      │     │    JWT      │     │         │
+└─────────┘     └─────────────┘     └─────────────┘     └─────────┘
+```
+
+**权限控制 / Permission Control:**
+- 基于角色的访问控制 (RBAC) / Role-based access control (RBAC)
+- 患者只能访问自己的数据 / Patients can only access their own data
+- 医生只能查看被提及的病例 / Doctors can only view mentioned cases
+- 管理员拥有完全访问权限 / Admins have full access
+
+### 6.2 数据保护 | Data Protection
+
+**PII 清洗 / PII Cleaning:**
+- 自动检测姓名、身份证号、电话、地址 / Auto-detect names, IDs, phones, addresses
+- 文档存储前清洗 / Clean before document storage
+- AI 处理前脱敏 / De-identify before AI processing
+
+**传输加密 / Transport Encryption:**
+- HTTPS/TLS 1.3
+- JWT 令牌签名 / JWT token signing
+- API 请求加密 / API request encryption
+
+### 6.3 审计日志 | Audit Logging
+
+**记录内容 / Logged Content:**
+- 用户登录/登出 / User login/logout
+- 数据访问 / Data access
+- 管理员操作 / Admin operations
+- AI 诊断请求 / AI diagnosis requests
+
+---
+
+<a name="scalability"></a>
+## 7. 可扩展性 | Scalability
+
+### 7.1 水平扩展 | Horizontal Scaling
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                      负载均衡器                           │
+│                    (Nginx/HAProxy)                       │
+└──────────────┬──────────────────────┬───────────────────┘
+               │                      │
+               ▼                      ▼
+┌─────────────────────┐    ┌─────────────────────┐
+│   后端实例 1         │    │   后端实例 2         │
+│  (FastAPI)          │    │  (FastAPI)          │
+└──────────┬──────────┘    └──────────┬──────────┘
+           │                          │
+           └──────────┬───────────────┘
+                      │
+        ┌─────────────┼─────────────┐
+        │             │             │
+        ▼             ▼             ▼
+┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+│ PostgreSQL  │ │    Redis    │ │  Alibaba    │
+│  (主从复制)  │ │   (集群)     │ │   Cloud OSS │
+│  主-从架构   │ │             │ │             │
+└─────────────┘ └─────────────┘ └─────────────┘
+```
+
+### 7.2 数据库扩展 | Database Scaling
+
+**读写分离 / Read-Write Splitting:**
+- 主库处理写操作 / Master handles writes
+- 从库处理读操作 / Slaves handle reads
+- 自动故障转移 / Automatic failover
+
+**分区策略 / Partitioning Strategy:**
+- 按时间分区 medical_cases 表 / Partition medical_cases by time
+- 按用户 ID 哈希分区 / Hash partition by user ID
+
+### 7.3 缓存策略 | Caching Strategy
+
+**多级缓存 / Multi-level Caching:**
+1. **应用层缓存 / Application Cache**: 函数结果缓存 / Function result caching
+2. **Redis 缓存 / Redis Cache**: 会话和 API 响应 / Sessions and API responses
+3. **CDN 缓存 / CDN Cache**: 静态资源 / Static assets
+
+---
+
+## 参考资源 | Reference Resources
+
+- [FastAPI Documentation](https://fastapi.tiangolo.com/) - FastAPI 框架文档
+- [SQLAlchemy Documentation](https://docs.sqlalchemy.org/) - SQLAlchemy ORM 文档
+- [PostgreSQL Documentation](https://www.postgresql.org/docs/) - PostgreSQL 文档
+- [Docker Documentation](https://docs.docker.com/) - Docker 容器文档
+- [System Design Primer](https://github.com/donnemartin/system-design-primer) - 系统设计入门
+
+---
+
+**文档版本 / Document Version**: 2.0.0  
+**最后更新 / Last Updated**: 2026-02-09  
+**作者 / Author**: 苏业钦 (Su Yeqin)

@@ -1,0 +1,266 @@
+{/*
+  Complete Registration & Profile Fix | 注册与个人中心完整修复
+  
+  修复了患者注册和访问个人中心时的多个关键问题：
+  1. Android 注册字段未正确发送到后端
+  2. 患者档案自动创建 500 错误
+  3. 数据模型不一致问题
+*/}
+
+# 注册与个人中心完整修复 | Complete Registration & Profile Fix
+
+> **修复日期 | Fix Date:** 2026-03-08  
+> **问题类型 | Issue Type:** 多平台综合问题 / Cross-Platform Issues  
+> **影响范围 | Impact:** 患者注册流程、个人中心、数据模型  
+> **版本 | Version:** v3.4.0
+
+---
+
+## 🐛 问题汇总 | Problem Summary
+
+### 问题一：Android 注册字段丢失
+
+**现象 | Symptoms:**
+- Android App 注册时填写了所有字段（出生日期、性别、电话、地址、紧急联系人）
+- 后端数据库只收到 email 和 full_name
+- 其他字段全部为 null
+
+**根本原因 | Root Cause:**
+```kotlin
+// MediCareApiClient.kt - 修复前
+body?.let {
+    setBody(it)  // ❌ 缺少 Content-Type 头部，JSON 序列化不完整
+}
+```
+
+Ktor 的 `DefaultRequest` 插件设置了 Content-Type，但在 `setBody()` 时不生效，导致 Kotlinx Serialization 没有正确序列化所有字段。
+
+**修复方案 | Fix:**
+```kotlin
+// 修复后
+body?.let {
+    contentType(ContentType.Application.Json)  // ✅ 显式设置 Content-Type
+    setBody(it)
+}
+```
+
+---
+
+### 问题二：患者档案自动创建失败（500 错误）
+
+**现象 | Symptoms:**
+- 新注册用户登录后访问"个人中心"
+- 页面显示"加载用户信息失败"
+- 控制台报错：`GET /api/v1/patients/me 500 (Internal Server Error)`
+- 错误信息：`'address' is an invalid keyword argument for Patient`
+
+**根本原因 | Root Cause:**
+
+1. **数据库模型变更未同步到服务层**
+   ```python
+   # Patient 模型（models.py）- 已移除 address 字段
+   class Patient(Base):
+       # ...
+       # address 字段已删除 - 统一使用 User 表的 address
+   
+   # 但 patient_service.py 仍在使用
+   db_patient = Patient(
+       user_id=user_id,
+       address=None,  # ❌ 无效的参数
+       # ...
+   )
+   ```
+
+2. **代码缩进错误**
+   - 之前的修复尝试引入了重复代码块
+   - 导致 Python `IndentationError`
+   - 后端容器无法启动，返回 502 Bad Gateway
+
+**修复方案 | Fix:**
+
+1. 从 `create_patient()` 方法中移除 `address` 参数
+2. 完全重写 `patient_service.py`，清理所有重复代码
+
+---
+
+### 问题三：注册时不创建患者档案
+
+**现象 | Symptoms:**
+- 用户注册成功
+- 数据库 users 表有记录
+- 但 patients 表没有对应记录
+- 导致首次访问个人中心时需要"自动创建"
+
+**修复方案 | Fix:**
+修改 `auth.py` 注册端点，确保总是创建 `Patient` 档案：
+```python
+# 创建患者档案（总是创建，即使没有额外信息）
+patient_data = PatientCreate(
+    date_of_birth=date_of_birth,
+    gender=user_data.gender,
+    phone=user_data.phone,
+    address=user_data.address,
+    emergency_contact=emergency_contact,
+)
+await patient_service.create_patient(patient_data, user.id)
+```
+
+---
+
+### 问题四：紧急联系人字段格式不一致
+
+**现象 | Symptoms:**
+- 有的 API 使用合并字段 `emergency_contact`
+- 有的使用分离字段 `emergency_contact_name` + `emergency_contact_phone`
+- Android 端和 Web 端显示不一致
+
+**修复方案 | Fix:**
+1. 数据库模型：保留分离字段
+2. API Schema：添加分离字段到 `UserCreate`, `UserUpdate`, `UserResponse`
+3. Android：更新 `RegisterRequest` 和 `Patient` 模型
+4. 前端：更新 `User` 类型定义
+
+---
+
+## 📋 部署流程 | Deployment Process
+
+### 完整修复流程
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  本地修复 Local Fix                                               │
+│  ├─ 修复 Android API 客户端 Content-Type 问题                      │
+│  ├─ 修复后端 Patient 模型 address 字段问题                         │
+│  ├─ 修复后端 patient_service.py 缩进错误                           │
+│  └─ 更新 CHANGELOG.md 和文档                                      │
+└──────────────────────────┬──────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  推送到 GitHub                                                  │
+│  git add . && git commit -m "..." && git push                     │
+└──────────────────────────┬──────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  VPS 部署 Deployment                                             │
+│  ├─ SSH 登录 VPS: ssh houge@8.137.177.147                        │
+│  ├─ 进入项目目录: cd /home/houge/MediCareAI                      │
+│  ├─ 拉取最新代码: git pull                                       │
+│  └─ 重启后端服务: docker compose restart backend                  │
+└──────────────────────────┬──────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  验证测试 Verification                                           │
+│  ├─ 检查容器状态: docker ps                                      │
+│  ├─ 查看后端日志: docker logs medicare_backend                    │
+│  ├─ Android 端注册测试                                           │
+│  └─ Web 端个人中心测试                                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🔧 技术细节 | Technical Details
+
+### Android 端修改
+
+**文件**: `MediCareApiClient.kt`
+```kotlin
+private suspend inline fun <reified T> makeRequest(
+    method: HttpMethod,
+    endpoint: String,
+    body: Any? = null,
+    queryParams: Map<String, String>? = null
+): Result<T> {
+    return try {
+        val response = client.request(BASE_URL + endpoint) {
+            this.method = method
+            authToken?.let {
+                header(HttpHeaders.Authorization, "Bearer $it")
+            }
+            body?.let {
+                contentType(ContentType.Application.Json)  // ✅ 关键修复
+                setBody(it)
+            }
+            // ...
+        }
+        // ...
+    }
+}
+```
+
+### 后端修改
+
+**文件**: `patient_service.py`
+```python
+async def create_patient(self, patient_data: PatientCreate, user_id: uuid.UUID) -> Patient:
+    # 检查病历号是否已存在
+    # ...
+    
+    db_patient = Patient(
+        user_id=user_id,
+        name=None,  # 从 User 表动态获取
+        date_of_birth=patient_data.date_of_birth,
+        gender=patient_data.gender,
+        phone=patient_data.phone,
+        # address=None,  # ✅ 已移除
+        emergency_contact=patient_data.emergency_contact,
+        medical_record_number=patient_data.medical_record_number
+    )
+    # ...
+```
+
+---
+
+## ✅ 验证清单 | Verification Checklist
+
+### Android 端测试
+- [ ] 打开 Android App
+- [ ] 进入注册页面
+- [ ] 填写所有字段：
+  - [ ] 姓名、邮箱、密码
+  - [ ] 出生日期
+  - [ ] 性别
+  - [ ] 电话
+  - [ ] 地址（省市区 + 详细地址）
+  - [ ] 紧急联系人姓名和电话
+- [ ] 提交注册
+- [ ] 验证后端数据库所有字段已保存
+
+### Web 端测试
+- [ ] 访问 https://openmedicareai.life
+- [ ] 使用新账号登录
+- [ ] 进入"个人中心"
+- [ ] 验证所有信息显示正确
+- [ ] 验证没有 500 错误
+
+### VPS 部署验证
+- [ ] 后端容器运行正常：`docker ps | grep backend`
+- [ ] 后端日志无错误：`docker logs medicare_backend`
+- [ ] API 响应正常：`curl https://openmedicareai.life/api/v1/health`
+
+---
+
+## 📝 总结 | Summary
+
+本次修复解决了患者注册和个人中心的多平台综合问题：
+
+| 问题 | 严重程度 | 状态 |
+|------|---------|------|
+| Android 注册字段丢失 | 🔴 严重 | ✅ 已修复 |
+| 患者档案创建 500 错误 | 🔴 严重 | ✅ 已修复 |
+| 数据模型不一致 | 🟡 中等 | ✅ 已修复 |
+| 紧急联系人字段格式 | 🟡 中等 | ✅ 已修复 |
+
+**修复状态 | Fix Status:** ✅ 已完成 / Completed  
+**代码验证 | Code Verification:** ✅ 通过 / Passed  
+**部署状态 | Deployment Status:** ✅ 已部署 / Deployed  
+**测试状态 | Testing Status:** 🔄 待验证 / Pending Verification
+
+---
+
+## 🔗 相关文档 | Related Documentation
+
+- [Android 构建指南](../README.md#android-app-build--android-应用构建)
+- [注册修复记录](./REGISTRATION_FIX.mdx)
+- [生产环境部署指南](./PRODUCTION_DEPLOYMENT.mdx)
+- [故障排除指南](./TROUBLESHOOTING.mdx)

@@ -1,0 +1,165 @@
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
+import { LocalizationProvider } from '@mui/x-date-pickers';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFnsV3';
+import { zhCN } from 'date-fns/locale';
+import { Box, CircularProgress } from '@mui/material';
+
+import { AuthProvider } from './contexts/AuthContext';
+import { LanguageProvider } from './contexts/LanguageContext';
+import { useAuth } from './hooks/useAuth';
+import ErrorBoundary from './components/common/ErrorBoundary';
+
+import LoginPage from './pages/auth/LoginPage';
+import RegisterPage from './pages/auth/RegisterPage';
+import VerifyEmailPage from './pages/auth/VerifyEmail';
+
+import PatientLayout from './components/layout/PatientLayout';
+import PatientDashboard from './pages/patient/Dashboard';
+import SymptomSubmit from './pages/patient/SymptomSubmit';
+import MedicalRecords from './pages/patient/MedicalRecords';
+import MedicalRecordDetail from './pages/patient/MedicalRecordDetail';
+import PatientProfile from './pages/patient/Profile';
+import CompleteProfile from './pages/patient/CompleteProfile';
+import PrescriptionScanner from './pages/patient/PrescriptionScanner';
+import PrescriptionTranslator from './pages/patient/PrescriptionTranslator';
+
+import DoctorLayout from './components/layout/DoctorLayout';
+import DoctorDashboard from './pages/doctor/Dashboard';
+import DoctorMentions from './pages/doctor/Mentions';
+import DoctorCases from './pages/doctor/Cases';
+import DoctorCaseDetail from './pages/doctor/CaseDetail';
+import DoctorProfile from './pages/doctor/Profile';
+import DoctorExport from './pages/doctor/Export';
+import DoctorMessages from './pages/doctor/Messages';
+
+import AdminLayout from './components/layout/AdminLayout';
+import AdminDashboard from './pages/admin/Dashboard';
+import AdminDoctors from './pages/admin/Doctors';
+import AdminKnowledgeBase from './pages/admin/KnowledgeBase';
+import AdminAIModels from './pages/admin/AIModels';
+import AdminLogs from './pages/admin/Logs';
+import AdminMessages from './pages/admin/Messages';
+import EmailConfig from './pages/admin/EmailConfig';
+import FraudDetectionDashboard from './pages/admin/FraudDetectionDashboard';
+
+import { organicTheme } from './theme';
+
+const theme = organicTheme;
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000,
+      retry: 1,
+    },
+  },
+});
+
+const ProtectedRoute: React.FC<{ allowedRoles?: string[] }> = ({ allowedRoles }) => {
+  const { isAuthenticated, user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Modified for Android WebView: Don't redirect to platform select on role mismatch
+  // This prevents the Android app from jumping to platform select page when
+  // navigating between doctor pages like /doctor/cases
+  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
+    // Log the mismatch for debugging but allow the navigation to proceed
+    // The API layer will enforce authorization, returning 403 if truly unauthorized
+    console.warn('[ProtectedRoute] Role mismatch detected:', {
+      userRole: user?.role,
+      allowedRoles: allowedRoles,
+      currentPath: window.location.pathname
+    });
+    // Return Outlet to render the requested page instead of redirecting to /
+    return <Outlet />;
+  }
+
+  return <Outlet />;
+};
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={zhCN}>
+          <LanguageProvider>
+            <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+              <AuthProvider>
+                <ErrorBoundary>
+                  <Routes>
+                    <Route path="/" element={<Navigate to="/login" replace />} />
+                    <Route path="/login" element={<LoginPage />} />
+                    <Route path="/register" element={<RegisterPage />} />
+                    <Route path="/doctor-login" element={<Navigate to="/login" replace />} />
+                    <Route path="/doctor-register" element={<Navigate to="/login" replace />} />
+                    <Route path="/admin-login" element={<Navigate to="/login" replace />} />
+                    <Route path="/verify-email" element={<VerifyEmailPage />} />
+                    
+                    <Route element={<ProtectedRoute allowedRoles={['patient']} />}>
+                      <Route path="/patient" element={<PatientLayout />}>
+                        <Route index element={<PatientDashboard />} />
+                        <Route path="complete-profile" element={<CompleteProfile />} />
+                        <Route path="symptom-submit" element={<SymptomSubmit />} />
+                        <Route path="prescription-scanner" element={<PrescriptionScanner />} />
+                        <Route path="prescription-translator" element={<PrescriptionTranslator />} />
+                        <Route path="fraud-detection" element={<FraudDetectionDashboard />} />
+                        <Route path="medical-records" element={<MedicalRecords />} />
+                        <Route path="medical-records/:id" element={<MedicalRecordDetail />} />
+                        <Route path="profile" element={<PatientProfile />} />
+                      </Route>
+                    </Route>
+
+                    <Route element={<ProtectedRoute allowedRoles={['doctor']} />}>
+                      <Route path="/doctor" element={<DoctorLayout />}>
+                        <Route index element={<DoctorDashboard />} />
+                        <Route path="mentions" element={<DoctorMentions />} />
+                        <Route path="cases" element={<DoctorCases />} />
+                        <Route path="cases/:id" element={<DoctorCaseDetail />} />
+                        <Route path="profile" element={<DoctorProfile />} />
+                        <Route path="export" element={<DoctorExport />} />
+                        <Route path="messages" element={<DoctorMessages />} />
+                      </Route>
+                    </Route>
+
+                    <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
+                      <Route path="/admin" element={<AdminLayout />}>
+                        <Route index element={<AdminDashboard />} />
+                        <Route path="fraud-detection" element={<FraudDetectionDashboard />} />
+                        <Route path="doctors" element={<AdminDoctors />} />
+                        <Route path="knowledge-base" element={<AdminKnowledgeBase />} />
+                        <Route path="ai-models" element={<AdminAIModels />} />
+                        <Route path="messages" element={<AdminMessages />} />
+                        <Route path="logs" element={<AdminLogs />} />
+                        <Route path="email-config" element={<EmailConfig />} />
+                      </Route>
+                    </Route>
+
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Routes>
+                </ErrorBoundary>
+              </AuthProvider>
+            </Router>
+          </LanguageProvider>
+        </LocalizationProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
+  );
+}
+
+export default App;

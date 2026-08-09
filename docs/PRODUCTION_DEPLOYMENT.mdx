@@ -1,0 +1,1598 @@
+{/*
+  Production Deployment Guide | 生产环境部署指南
+  
+  从开发环境迁移到生产环境的完整指南
+  Complete guide for migrating from development to production environment
+  
+  版本 / Version: 1.0.0
+  更新日期 / Updated: 2026-02-25
+*/}
+
+
+> **⚠️ 重要提示 / Important Notice**
+> 
+> 本文档描述如何将 MediCareAI 从**开发环境**迁移到**生产环境**。
+> 当前代码库配置为开发模式，生产部署前必须完成以下配置。
+>
+> This guide describes how to migrate MediCareAI from **development** to **production**.
+> The current codebase is configured for development mode, and the following configurations must be completed before production deployment.
+
+---
+
+## 📋 目录 | Table of Contents
+
+- [当前项目状态 | Current Project Status](#current-status)
+- [安全清单 | Security Checklist](#security-checklist)
+- [环境配置 | Environment Configuration](#environment-configuration)
+- [CORS 配置 | CORS Configuration](#cors-configuration)
+- [SSL/TLS 配置 | SSL/TLS Configuration](#ssl-configuration)
+- [数据库配置 | Database Configuration](#database-configuration)
+- [AI 服务配置 | AI Service Configuration](#ai-configuration)
+- [监控与日志 | Monitoring and Logging](#monitoring)
+- [部署步骤 | Deployment Steps](#deployment-steps)
+- [验证检查 | Verification Checklist](#verification)
+
+---
+
+<a name="current-status"></a>
+## 🚨 当前项目状态 | Current Project Status
+
+### 开发环境配置（当前）| Development Configuration (Current)
+
+#### 1. CORS 配置 - 允许所有源 ⚠️
+```python
+# backend/app/main.py
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # ❌ 生产环境必须修改
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["*"],  # ❌ 过于宽松
+    expose_headers=["*"],
+    max_age=3600,
+)
+```
+
+**风险 | Risks:**
+- 任何网站都可以访问你的 API
+- 容易受到 CSRF 攻击
+- 医疗数据可能被恶意网站获取
+- 违反数据保护法规（HIPAA、GDPR、网络安全法）
+
+#### 2. Trusted Host - 允许所有主机 ⚠️
+```python
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["*"],  # ❌ 生产环境必须限制
+)
+```
+
+#### 3. 调试模式 | Debug Mode
+```yaml
+# docker-compose.yml
+backend:
+  environment:
+    DEBUG: "true"  # ❌ 生产环境必须设为 false
+```
+
+#### 4. 默认密码 | Default Passwords
+```yaml
+# docker-compose.yml
+postgres:
+  environment:
+    POSTGRES_PASSWORD: medicare123456  # ❌ 必须修改
+```
+
+---
+
+<a name="security-checklist"></a>
+## ✅ 生产环境安全清单 | Production Security Checklist
+
+在部署前必须完成以下检查：
+
+### 🔐 认证与授权 | Authentication & Authorization
+- [ ] 修改所有默认密码（数据库、Redis、管理员账户）
+- [ ] 配置 JWT 密钥（至少 32 位随机字符串）
+- [ ] 启用 API 密钥加密（API_KEY_MASTER_KEY）
+- [ ] 配置密码复杂度策略
+- [ ] 启用账户锁定机制（防止暴力破解）
+
+### 🌐 网络安全 | Network Security
+- [ ] 配置 CORS 只允许特定域名
+- [ ] 启用 HTTPS（SSL/TLS 证书）
+- [ ] 配置防火墙规则（只开放必要端口）
+- [ ] 启用 DDoS 防护
+- [ ] 配置 Rate Limiting（请求频率限制）
+
+### 🏥 医疗数据安全 | Medical Data Security
+- [ ] 启用 PII 数据清洗功能
+- [ ] 配置数据加密（传输中和静态数据）
+- [ ] 启用审计日志（记录所有数据访问）
+- [ ] 配置数据备份策略
+- [ ] 设置数据保留期限
+
+### 🔍 监控与告警 | Monitoring & Alerting
+- [ ] 配置应用性能监控（APM）
+- [ ] 设置错误告警机制
+- [ ] 配置日志聚合（ELK Stack 或类似方案）
+- [ ] 设置健康检查端点监控
+- [ ] 配置 SSL 证书过期提醒
+
+---
+
+<a name="environment-configuration"></a>
+## ⚙️ 环境配置 | Environment Configuration
+
+### 1. 创建生产环境文件 | Create Production Environment File
+
+```bash
+# 复制环境变量模板
+cp .env.example .env.production
+```
+
+### 2. 配置数据库 | Database Configuration
+
+```bash
+# .env.production
+# 生成强密码（至少 32 位）
+POSTGRES_PASSWORD=$(openssl rand -base64 32)
+
+# 或使用密码管理工具
+POSTGRES_PASSWORD=your_secure_password_here
+```
+
+### 3. 配置 Redis | Redis Configuration
+
+```bash
+# .env.production
+REDIS_PASSWORD=$(openssl rand -base64 32)
+```
+
+### 4. 配置 JWT | JWT Configuration
+
+```bash
+# .env.production
+# 生成 JWT 密钥（必须至少 32 位）
+JWT_SECRET_KEY=$(openssl rand -base64 64)
+
+# 示例（不要直接使用）
+JWT_SECRET_KEY=your_jwt_secret_key_at_least_32_characters_long_change_this
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
+JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
+```
+
+### 5. 配置 API 密钥加密 | API Key Encryption
+
+```bash
+# .env.production
+# 生成主密钥（用于加密存储的 API 密钥）
+API_KEY_MASTER_KEY=$(openssl rand -base64 32)
+```
+
+---
+
+<a name="cors-configuration"></a>
+## 🔒 CORS 配置 | CORS Configuration
+
+### 环境变量配置方式（推荐）| Environment Variable Configuration (Recommended)
+
+**代码已实现自动从环境变量读取配置，无需修改 main.py！**
+
+#### 1. 配置环境变量 | Configure Environment Variables
+
+编辑 `.env` 文件（生产环境）或 `.env.production`：
+
+```bash
+# =============================================================================
+# CORS 跨域配置 | CORS Cross-Origin Configuration
+# =============================================================================
+# ⚠️ 生产环境必须配置此项，否则API将无法从浏览器访问！
+# ⚠️ Production MUST configure this, or API won't be accessible from browsers!
+#
+# 格式：JSON数组格式
+# Format: JSON array format
+
+# 本地开发环境 | Local Development:
+CORS_ORIGINS=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:8080", "http://localhost:8081"]
+
+# 生产环境示例 | Production Example:
+# CORS_ORIGINS=["https://openmedicareai.life", "https://www.openmedicareai.life"]
+```
+
+#### 2. 配置允许的主机头 | Configure Allowed Host Headers
+
+```bash
+# =============================================================================
+# 允许的主机头 | Allowed Host Headers
+# =============================================================================
+# 用于防止 Host Header 攻击
+# Used to prevent Host Header attacks
+#
+# 格式：JSON数组格式
+# Format: JSON array format
+
+# 本地开发环境 | Local Development:
+ALLOWED_HOSTS=["localhost", "127.0.0.1", "*"]
+
+# 生产环境示例 | Production Example:
+# ALLOWED_HOSTS=["openmedicareai.life", "www.openmedicareai.life"]
+```
+
+#### 3. 配置信任的代理主机 | Configure Trusted Proxy Hosts
+
+```bash
+# =============================================================================
+# 信任的代理主机 | Trusted Proxy Hosts
+# =============================================================================
+# 用于正确识别 X-Forwarded-* 头（特别是 X-Forwarded-Proto: https）
+# Used to correctly identify X-Forwarded-* headers (especially X-Forwarded-Proto: https)
+# 这对于防止 Mixed Content Error 至关重要！
+# This is CRITICAL for preventing Mixed Content Error!
+#
+# 格式：JSON数组格式
+# Format: JSON array format
+
+# 本地开发环境 | Local Development:
+TRUSTED_PROXY_HOSTS=["*"]
+
+# 生产环境示例 | Production Example:
+# 限制为 Docker 网络和本地网络
+# TRUSTED_PROXY_HOSTS=["nginx", "127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+```
+
+### 配置验证 | Configuration Verification
+
+配置完成后，验证后端是否正确读取配置：
+
+```bash
+# 进入后端容器
+ docker-compose exec backend bash
+
+# 检查环境变量
+echo $CORS_ORIGINS
+echo $ALLOWED_HOSTS
+echo $TRUSTED_PROXY_HOSTS
+
+# 测试 CORS 配置
+curl -H "Origin: https://your-domain.com" \
+     -H "Access-Control-Request-Method: POST" \
+     -H "Access-Control-Request-Headers: Content-Type" \
+     -X OPTIONS \
+     https://your-domain.com/api/v1/health
+```
+
+### 常见问题 | Common Issues
+
+#### 问题 1：CORS 错误仍然存在
+**症状：** 浏览器控制台显示 CORS policy error
+
+**原因：**
+1. 环境变量未正确设置
+2. 使用了错误的域名格式
+3. 缺少 `https://` 前缀
+
+**解决方案：**
+```bash
+# 检查环境变量是否生效
+docker-compose exec backend env | grep CORS
+
+# 重启后端服务以重新加载配置
+docker-compose restart backend
+
+# 验证配置格式（必须是有效的JSON数组）
+# 正确：["https://domain.com"]
+# 错误：https://domain.com
+# 错误：["https://domain.com",]  # 末尾逗号
+```
+
+#### 问题 2：Mixed Content Error
+**症状：**
+```
+Mixed Content: The page at 'https://...' was loaded over HTTPS,
+but requested an insecure XMLHttpRequest endpoint 'http://...'
+```
+
+**原因：**
+1. `TRUSTED_PROXY_HOSTS` 未配置，导致后端无法识别 HTTPS 请求
+2. Nginx 未正确传递 `X-Forwarded-Proto: https` 头
+
+**解决方案：**
+```bash
+# 1. 确保 .env 中配置了 TRUSTED_PROXY_HOSTS
+TRUSTED_PROXY_HOSTS=["nginx", "127.0.0.1"]
+
+# 2. 确保 Nginx 配置正确
+docker-compose exec nginx nginx -t
+
+# 3. 重启所有服务
+docker-compose restart
+```
+
+#### 问题 3：Host Header 攻击警告
+**症状：** 日志中出现 `Invalid host` 错误
+
+**原因：** `ALLOWED_HOSTS` 未包含实际访问的域名
+
+**解决方案：**
+```bash
+# 检查实际访问的域名
+docker-compose logs backend | grep "Invalid host"
+
+# 将域名添加到 ALLOWED_HOSTS
+ALLOWED_HOSTS=["your-domain.com", "www.your-domain.com"]
+```
+
+---
+
+### 修改 backend/app/core/config.py
+
+```python
+# 生产环境允许的域名
+# 根据你的实际域名修改
+cors_origins: List[str] = [
+    "https://medicare.yourdomain.com",           # 患者端主域名
+    "https://admin.medicare.yourdomain.com",     # 管理员端
+    "https://doctor.medicare.yourdomain.com",    # 医生端
+    "https://www.medicare.yourdomain.com",       # WWW 域名
+]
+
+# 或者从环境变量读取（推荐）
+cors_origins: List[str] = os.getenv(
+    "CORS_ORIGINS", 
+    "https://medicare.yourdomain.com"
+).split(",")
+```
+
+### 修改 backend/app/main.py
+
+```python
+# 方式 1：直接使用配置
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,  # 使用配置文件
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Platform", "X-Requested-With"],
+    expose_headers=["X-Process-Time"],
+    max_age=3600,
+)
+
+# 方式 2：动态判断（开发 vs 生产）
+allow_origins = (
+    ["*"] 
+    if os.getenv("DEBUG") == "true" or os.getenv("ENV") == "development"
+    else settings.cors_origins
+)
+```
+
+### 配置环境变量
+
+```bash
+# .env.production
+CORS_ORIGINS=https://medicare.yourdomain.com,https://admin.medicare.yourdomain.com
+```
+
+---
+
+<a name="ssl-configuration"></a>
+## 🔐 SSL/TLS 配置 | SSL/TLS Configuration
+
+### 1. 获取 SSL 证书 | Obtain SSL Certificate
+
+#### 方式 A：Let's Encrypt（免费）| Option A: Let's Encrypt (Free)
+```bash
+# 安装 certbot
+sudo apt-get install certbot
+
+# 获取证书
+sudo certbot certonly --standalone -d medicare.yourdomain.com -d admin.medicare.yourdomain.com
+
+# 证书位置
+# /etc/letsencrypt/live/medicare.yourdomain.com/fullchain.pem
+# /etc/letsencrypt/live/medicare.yourdomain.com/privkey.pem
+```
+
+#### 方式 B：商业证书 | Option B: Commercial Certificate
+```bash
+# 将证书文件放置在项目目录
+mkdir -p docker/nginx/ssl
+cp your_certificate.crt docker/nginx/ssl/
+cp your_private.key docker/nginx/ssl/
+cp ca_bundle.crt docker/nginx/ssl/
+```
+
+### 2. 配置 Nginx | Configure Nginx
+
+```nginx
+# docker/nginx/nginx.conf
+server {
+    listen 443 ssl http2;
+    server_name medicare.yourdomain.com;
+
+    # SSL 配置
+    ssl_certificate /etc/nginx/ssl/fullchain.pem;
+    ssl_certificate_key /etc/nginx/ssl/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # 安全响应头
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    location / {
+        root /usr/share/nginx/html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# HTTP 重定向到 HTTPS
+server {
+    listen 80;
+    server_name medicare.yourdomain.com;
+    return 301 https://$server_name$request_uri;
+}
+```
+
+### 3. 反向代理配置 | Reverse Proxy Configuration
+
+当使用 Nginx 作为反向代理时，必须配置后端应用以识别转发的协议头。这是**防止 Mixed Content Error 的关键配置**。
+
+#### 配置 ProxyHeadersMiddleware | Configure ProxyHeadersMiddleware
+
+编辑 `backend/app/main.py`:
+
+```python
+from fastapi import FastAPI
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+app = FastAPI()
+
+# 添加 ProxyHeadersMiddleware 以信任 Nginx 传递的 X-Forwarded-* 头
+app.add_middleware(
+    ProxyHeadersMiddleware,
+    trusted_hosts=["*"],  # 生产环境应指定具体的 Nginx 容器 IP 或主机名
+)
+
+# 其他中间件...
+```
+
+**重要提示 | Important Notes**:
+- `ProxyHeadersMiddleware` 必须**尽早添加**，在其他中间件之前
+- 此配置确保 FastAPI 正确识别 `X-Forwarded-Proto: https` 头
+- 防止后端生成 HTTP URL 导致的 Mixed Content 错误
+- 生产环境应将 `trusted_hosts` 限制为具体的可信主机
+
+#### Nginx 配置验证 | Nginx Configuration Verification
+
+确保 Nginx 正确传递协议头:
+
+```nginx
+location /api/ {
+    proxy_pass http://backend:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;  # 关键: 传递协议类型
+    
+    # 超时配置
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+}
+```
+
+#### 常见问题 | Common Issues
+
+**Mixed Content Error**:
+```
+Mixed Content: The page at 'https://...' was loaded over HTTPS, 
+but requested an insecure XMLHttpRequest endpoint 'http://...'
+```
+
+**解决方案**: 确保同时配置了:
+1. Nginx: `proxy_set_header X-Forwarded-Proto $scheme;`
+2. FastAPI: `ProxyHeadersMiddleware` 中间件
+
+---
+
+---
+
+<a name="database-configuration"></a>
+## 🗄️ 数据库配置 | Database Configuration
+
+### 1. 生产环境数据库设置 | Production Database Settings
+
+```yaml
+# docker-compose.prod.yml
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  # 从环境变量读取
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # 备份卷
+      - ./backups:/backups
+    command: 
+      - "postgres"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=768MB"
+      - "-c"
+      - "maintenance_work_mem=64MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=16MB"
+      - "-c"
+      - "default_statistics_target=100"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "work_mem=655kB"
+      - "-c"
+      - "min_wal_size=1GB"
+      - "-c"
+      - "max_wal_size=4GB"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+```
+
+### 2. 数据库备份策略 | Database Backup Strategy
+
+```bash
+#!/bin/bash
+# backup.sh - 数据库备份脚本
+
+BACKUP_DIR="/backups"
+DATE=$(date +%Y%m%d_%H%M%S)
+DB_NAME="medicareai"
+DB_USER="medicare_user"
+
+# 创建备份
+docker exec medicare_postgres pg_dump -U $DB_USER -d $DB_NAME | gzip > $BACKUP_DIR/backup_$DATE.sql.gz
+
+# 保留最近 7 天的备份
+find $BACKUP_DIR -name "backup_*.sql.gz" -mtime +7 -delete
+
+# 可选：上传到云存储
+# aws s3 cp $BACKUP_DIR/backup_$DATE.sql.gz s3://your-backup-bucket/
+```
+
+---
+
+<a name="ai-configuration"></a>
+## 🤖 AI 服务配置 | AI Service Configuration
+
+### 1. 配置 AI API | Configure AI API
+
+```bash
+# .env.production
+AI_API_KEY=your_actual_ai_api_key_here
+AI_API_URL=https://api.your-ai-provider.com/v1/
+AI_MODEL_ID=unsloth/GLM-4.7-Flash-GGUF:BF16
+```
+
+### 2. 配置 MinerU | Configure MinerU
+
+```bash
+# .env.production
+MINERU_TOKEN=your_actual_mineru_token_here
+```
+
+### 3. 配置向量嵌入服务 | Configure Embedding Service
+
+```bash
+# .env.production
+EMBEDDING_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+EMBEDDING_API_KEY=your_qwen_api_key_here
+EMBEDDING_MODEL_ID=text-embedding-v3
+```
+
+### 4. 配置 OSS（阿里云对象存储）| Configure OSS
+
+```bash
+# .env.production
+OSS_ACCESS_KEY_ID=your_oss_access_key_id
+OSS_ACCESS_KEY_SECRET=your_oss_access_key_secret
+OSS_BUCKET=your_bucket_name
+OSS_ENDPOINT=oss-cn-beijing.aliyuncs.com
+OSS_PUBLIC_URL=https://your-bucket.oss-cn-beijing.aliyuncs.com
+```
+
+---
+
+<a name="monitoring"></a>
+## 📊 监控与日志 | Monitoring and Logging
+
+### 1. 配置日志聚合 | Configure Log Aggregation
+
+```python
+# backend/app/core/logging.py
+import logging
+import json
+from pythonjsonlogger import jsonlogger
+
+# JSON 格式日志（便于日志聚合）
+logHandler = logging.StreamHandler()
+formatter = jsonlogger.JsonFormatter(
+    '%(timestamp)s %(level)s %(name)s %(message)s',
+    rename_fields={'levelname': 'level', 'asctime': 'timestamp'}
+)
+logHandler.setFormatter(formatter)
+
+logger = logging.getLogger()
+logger.addHandler(logHandler)
+logger.setLevel(logging.INFO)
+```
+
+### 2. 健康检查端点 | Health Check Endpoint
+
+```python
+# 已有端点：GET /health
+# 添加详细健康检查
+
+@app.get("/health/detailed")
+async def detailed_health_check():
+    checks = {
+        "database": await check_database(),
+        "redis": await check_redis(),
+        "ai_service": await check_ai_service(),
+        "storage": await check_storage(),
+    }
+    
+    all_healthy = all(checks.values())
+    
+    return {
+        "status": "healthy" if all_healthy else "unhealthy",
+        "checks": checks,
+        "timestamp": time.time(),
+    }
+```
+
+### 3. 配置 Prometheus 监控 | Configure Prometheus Monitoring
+
+```yaml
+# docker-compose.prod.yml
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+  
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+```
+
+---
+
+<a name="deployment-steps"></a>
+## 🚀 部署步骤 | Deployment Steps
+
+### 步骤 1：准备服务器 | Step 1: Prepare Server
+
+```bash
+# 更新系统
+sudo apt-get update && sudo apt-get upgrade -y
+
+# 安装 Docker
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+
+# 安装 Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+
+# 安装其他工具
+sudo apt-get install -y git openssl nginx certbot python3-certbot-nginx
+```
+
+### 步骤 2：克隆代码 | Step 2: Clone Repository
+
+```bash
+cd /opt
+sudo mkdir -p medicareai
+sudo chown $USER:$USER medicareai
+cd medicareai
+git clone https://github.com/your-repo/MediCareAI.git .
+```
+
+### 步骤 3：配置环境变量 | Step 3: Configure Environment
+
+```bash
+# 生成密码和密钥
+./scripts/generate-secrets.sh
+
+# 编辑配置文件
+nano .env.production
+
+# 验证配置
+./scripts/validate-config.sh
+```
+
+### 步骤 4：修改代码配置 | Step 4: Modify Code Configuration
+
+```bash
+# 修改 CORS 配置
+nano backend/app/core/config.py
+# 修改 cors_origins 为你的域名
+
+# 修改 main.py（如果需要）
+nano backend/app/main.py
+# 确保使用 settings.cors_origins
+```
+
+### 步骤 5：构建和启动 | Step 5: Build and Start
+
+```bash
+# 使用生产配置
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+
+# 等待服务启动
+sleep 30
+
+# 检查状态
+docker-compose ps
+docker-compose logs -f backend
+```
+
+### 步骤 6：配置 SSL | Step 6: Configure SSL
+
+```bash
+# 获取证书
+sudo certbot --nginx -d medicare.yourdomain.com -d admin.medicare.yourdomain.com
+
+# 测试自动续期
+sudo certbot renew --dry-run
+```
+
+### 步骤 7：初始化数据库 | Step 7: Initialize Database
+
+```bash
+# 运行数据库迁移
+docker-compose exec backend alembic upgrade head
+
+# 创建管理员账户
+docker-compose exec backend python scripts/create_admin.py
+```
+
+### 步骤 8：验证部署 | Step 8: Verify Deployment
+
+```bash
+# 健康检查
+curl -s https://medicare.yourdomain.com/health | jq
+
+# API 测试
+curl -s https://medicare.yourdomain.com/api/v1/ | jq
+
+# 前端访问
+# 在浏览器中打开 https://medicare.yourdomain.com
+```
+
+---
+
+<a name="verification"></a>
+## ✔️ 验证检查清单 | Verification Checklist
+
+### 功能验证 | Functional Verification
+- [ ] 用户注册和登录正常工作
+- [ ] 患者可以提交症状
+- [ ] AI 诊断功能正常
+- [ ] 医生可以查看病例
+- [ ] 管理员面板可以访问
+- [ ] 文件上传和下载正常
+
+### 安全验证 | Security Verification
+- [ ] HTTPS 正常工作（SSL Labs 评分 A+）
+- [ ] HTTP 自动重定向到 HTTPS
+- [ ] 安全响应头正确设置
+- [ ] CORS 只允许特定域名
+- [ ] 密码复杂度要求生效
+- [ ] JWT Token 正确验证
+
+### 性能验证 | Performance Verification
+- [ ] 页面加载时间 < 3 秒
+- [ ] API 响应时间 < 500ms
+- [ ] 数据库查询优化
+- [ ] 静态文件缓存生效
+- [ ] 图片和资源压缩
+
+### 监控验证 | Monitoring Verification
+- [ ] 日志正确记录
+- [ ] 错误告警正常发送
+- [ ] 健康检查端点返回 200
+- [ ] Prometheus 指标收集正常
+- [ ] Grafana 仪表板可访问
+
+---
+
+## 🆘 故障排除 | Troubleshooting
+
+### 问题 1：CORS 错误仍然存在
+**原因：** 缓存或配置未生效
+```bash
+# 重启后端服务
+docker-compose restart backend
+
+# 检查配置
+docker-compose exec backend python -c "from app.core.config import settings; print(settings.cors_origins)"
+```
+
+### 问题 2：SSL 证书错误
+**原因：** 证书路径错误或权限问题
+```bash
+# 检查证书权限
+sudo ls -la /etc/letsencrypt/live/
+
+# 重新生成证书
+sudo certbot renew --force-renewal
+```
+
+### 问题 3：数据库连接失败
+**原因：** 密码错误或网络问题
+```bash
+# 检查数据库日志
+docker-compose logs postgres
+
+# 测试连接
+docker-compose exec postgres psql -U medicare_user -d medicareai
+```
+
+---
+
+## 📚 参考文档 | References
+
+- [FastAPI CORS 文档](https://fastapi.tiangolo.com/tutorial/cors/)
+- [Let's Encrypt 文档](https://letsencrypt.org/docs/)
+- [Docker 生产环境最佳实践](https://docs.docker.com/develop/dev-best-practices/)
+- [OWASP 安全 Headers 指南](https://owasp.org/www-project-secure-headers/)
+
+---
+## 📧 Email Service Configuration | 邮件服务配置
+
+### 为什么需要配置邮件服务 | Why Email Configuration is Required
+
+邮件服务是 MediCareAI 的核心功能之一，用于发送：
+- 患者注册邮箱验证邮件
+- 密码重置邮件
+- **医生注册审核通知邮件** ⭐（关键功能）
+- 系统通知邮件
+
+**常见问题**：本地开发环境邮件发送正常，但远程生产环境却无法发送医生审核通过邮件。
+
+**根本原因**：远程服务器缺少 SMTP 环境变量配置。
+
+---
+
+### 邮件服务配置步骤 | Email Configuration Steps
+
+#### 方法 1：使用环境变量（推荐用于生产环境）| Method 1: Environment Variables (Recommended)
+
+编辑远程服务器的 `.env` 文件：
+
+```bash
+# 连接到远程服务器
+ssh houge@8.137.177.147
+
+# 编辑 .env 文件
+cd ~/MediCareAI
+nano .env
+```
+
+添加以下邮件配置：
+
+```env
+# =============================================================================
+# 邮件服务配置 (生产环境必需)
+# =============================================================================
+
+# SMTP 服务器地址
+# Gmail:     smtp.gmail.com
+# Outlook:   smtp.office365.com  
+# QQ邮箱:    smtp.qq.com
+# 163邮箱:   smtp.163.com
+SMTP_HOST=smtp.gmail.com
+
+# SMTP 端口
+# 465 = SSL 直接连接 (QQ邮箱、163邮箱)
+# 587 = STARTTLS (Gmail、Outlook)
+SMTP_PORT=587
+
+# 邮箱用户名
+SMTP_USER=your-email@gmail.com
+
+# 邮箱密码或应用专用密码
+# 注意：Gmail/QQ邮箱需要使用"应用专用密码"而非登录密码
+SMTP_PASSWORD=your-app-specific-password
+
+# 发件人邮箱（通常与 SMTP_USER 相同）
+SMTP_FROM_EMAIL=your-email@gmail.com
+
+# 发件人名称
+SMTP_FROM_NAME=MediCareAI
+
+# 是否使用 TLS
+# 端口 465 时设为 false
+# 端口 587 时设为 true
+SMTP_USE_TLS=true
+
+# 前端 URL（用于邮件中的登录链接）
+FRONTEND_URL=https://openmedicareai.life
+```
+
+**重要提示**：
+- Gmail/QQ邮箱需要使用**应用专用密码**，而非登录密码
+- Gmail 应用密码获取：https://myaccount.google.com/apppasswords
+- QQ邮箱授权码获取：邮箱设置 -> 账户 -> 开启SMTP服务
+
+---
+
+#### 方法 2：使用管理员界面（适合快速测试）| Method 2: Admin Interface
+
+1. 登录管理员后台：`https://openmedicareai.life:8444`
+2. 进入"系统设置" -> "邮件配置"
+3. 填写 SMTP 配置并测试
+4. 设置为默认配置
+
+⚠️ **注意**：数据库配置优先级高于环境变量，但建议生产环境使用环境变量以确保稳定性。
+
+---
+
+### 常见邮箱服务商配置 | Common Email Provider Configurations
+
+| 邮箱服务商 | SMTP_HOST | 端口 | USE_TLS | 特殊说明 |
+|-----------|-----------|------|---------|---------|
+| **Gmail** | smtp.gmail.com | 587 | true | 需要应用专用密码 |
+| **Outlook** | smtp.office365.com | 587 | true | 需要应用专用密码 |
+| **QQ邮箱** | smtp.qq.com | 465 | false | 需要授权码 |
+| **163邮箱** | smtp.163.com | 465 | false | 需要授权码 |
+| **阿里云** | smtp.aliyun.com | 465 | false | 需要授权码 |
+
+---
+
+### 故障排除 | Troubleshooting
+
+#### 问题 1：SSL/TLS 错误
+**症状**：
+```
+SMTP error: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol
+```
+
+**原因**：端口和加密方式不匹配
+
+**解决方案**：
+- 端口 465：设置 `SMTP_USE_TLS=false`（使用 SSL 直接连接）
+- 端口 587：设置 `SMTP_USE_TLS=true`（使用 STARTTLS）
+
+#### 问题 2：认证失败
+**症状**：
+```
+SMTP error: (535, b'5.7.8 Username and Password not accepted')
+```
+
+**原因**：
+1. 使用了登录密码而非应用专用密码
+2. 邮箱未开启 SMTP 服务
+
+**解决方案**：
+1. 生成并使用应用专用密码
+2. 在邮箱设置中开启 SMTP/IMAP 服务
+
+#### 问题 3：邮件发送成功但医生收不到
+**症状**：日志显示发送成功，但医生未收到邮件
+
+**原因**：邮件被归入垃圾邮件文件夹
+
+**解决方案**：
+1. 检查垃圾邮件文件夹
+2. 将发件人添加到联系人
+3. 检查邮件内容是否触发垃圾邮件过滤规则
+
+---
+
+### 快速诊断脚本 | Quick Diagnostic Script
+
+使用提供的脚本快速检查和修复邮件配置：
+
+```bash
+# 检查当前邮件配置
+./scripts/email-config-check.sh
+
+# 交互式修复配置
+./scripts/email-config-check.sh --fix
+
+# 测试邮件发送
+./scripts/email-config-check.sh --test
+```
+
+---
+
+### 验证邮件配置 | Verify Email Configuration
+
+配置完成后，重启后端服务并测试：
+
+```bash
+# 重启后端服务
+docker compose restart backend
+
+# 查看日志确认配置加载
+docker compose logs backend | grep -i "email\|mail\|smtp"
+
+# 在管理员后台审核一个医生，检查邮件是否发送成功
+docker compose logs backend | grep "医生审核通过"
+```
+
+---
+
+## 📝 更新日志 | Changelog
+## 📝 更新日志 | Changelog
+
+### Version 1.0.0 (2026-02-25)
+- 初始版本
+- 包含从开发到生产的完整迁移指南
+- 涵盖 CORS、SSL、数据库、监控等配置
+
+---
+
+**⚠️ 最后提醒：在生产环境部署前，请务必完成本清单中的所有检查项！**
+
+**⚠️ Final Reminder: Please complete all checklist items before deploying to production!**
+
+
+---
+
+## 🔧 Production Deployment Fixes (2026-03-02) | 生产部署修复
+
+### Critical Configuration Updates | 关键配置更新
+
+Based on real-world deployment experience, the following configurations are **REQUIRED** for successful production deployment:
+
+#### 1. Frontend Configuration | 前端配置
+
+**File: `frontend/vite.config.ts`**
+
+```typescript
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 3000,
+    host: true,
+    // REQUIRED: Allow Nginx reverse proxy
+    allowedHosts: [
+      'medicare_frontend',           // Docker container name
+      'openmedicareai.life',         // Your domain
+      'www.openmedicareai.life',     // WWW domain
+      'localhost',                   // Local development
+    ],
+    // REQUIRED: Disable HMR in production
+    hmr: false,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+    },
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: true,
+  },
+})
+```
+
+**File: `frontend/src/lib/config.ts`**
+
+```typescript
+export const CONFIG = {
+  // CRITICAL: Use relative path for production
+  // This ensures API calls go through Nginx proxy
+  API_BASE: '',  // Empty string = relative path
+  API_VERSION: '/api/v1',
+  
+  REQUEST_TIMEOUT: 30000,
+  TOKEN_KEY: 'medicare_token',
+  // ... other configs
+}
+```
+
+#### 2. Nginx Multi-Platform SSL Configuration | Nginx 多平台 SSL 配置
+
+**File: `docker/nginx/nginx.conf`**
+
+```nginx
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    
+    # Logging
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+    
+    access_log /var/log/nginx/access.log main;
+    error_log /var/log/nginx/error.log warn;
+    
+    # Performance
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    
+    # Upload limit
+    client_max_body_size 200M;
+    
+    # Rate limiting
+    limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+    limit_req_zone $binary_remote_addr zone=login:10m rate=1r/s;
+    
+    # Upstream servers
+    upstream backend {
+        server medicare_backend:8000;
+        keepalive 32;
+    }
+    
+    upstream frontend {
+        server medicare_frontend:3000;
+        keepalive 32;
+    }
+    
+    # HTTP to HTTPS redirect
+    server {
+        listen 80;
+        server_name openmedicareai.life www.openmedicareai.life;
+        return 301 https://$server_name$request_uri;
+    }
+    
+    # ============================================
+    # Patient Platform - HTTPS (443)
+    # ============================================
+    server {
+        listen 443 ssl;
+        server_name openmedicareai.life www.openmedicareai.life;
+        
+        # SSL Configuration
+        ssl_certificate /etc/nginx/ssl/cert.pem;
+        ssl_certificate_key /etc/nginx/ssl/key.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+        ssl_prefer_server_ciphers on;
+        
+        # Security headers
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        
+        # CORS headers
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+        
+        # Login rate limiting
+        location /api/v1/auth/login {
+            limit_req zone=login burst=5 nodelay;
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Platform "patient";
+        }
+        
+        # API routes
+        location /api/ {
+            proxy_pass http://backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Platform "patient";
+            proxy_buffering off;
+            proxy_read_timeout 300s;
+        }
+        
+        # Frontend
+        location / {
+            proxy_pass http://frontend;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Platform "patient";
+            proxy_intercept_errors on;
+            error_page 404 = /index.html;
+        }
+    }
+    
+    # ============================================
+    # Doctor Platform - HTTPS (8443)
+    # ============================================
+    server {
+        listen 8443 ssl;
+        server_name openmedicareai.life;
+        
+        ssl_certificate /etc/nginx/ssl/cert.pem;
+        ssl_certificate_key /etc/nginx/ssl/key.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+        
+        location /api/v1/auth/login {
+            limit_req zone=login burst=5 nodelay;
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Platform "doctor";
+        }
+        
+        location /api/ {
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Platform "doctor";
+        }
+        
+        location / {
+            proxy_pass http://frontend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Platform "doctor";
+            proxy_intercept_errors on;
+            error_page 404 = /index.html;
+        }
+    }
+    
+    # ============================================
+    # Admin Platform - HTTPS (8444)
+    # ============================================
+    server {
+        listen 8444 ssl;
+        server_name openmedicareai.life;
+        
+        ssl_certificate /etc/nginx/ssl/cert.pem;
+        ssl_certificate_key /etc/nginx/ssl/key.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+        
+        location /api/v1/auth/login {
+            limit_req zone=login burst=5 nodelay;
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Platform "admin";
+        }
+        
+        location /api/ {
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Platform "admin";
+        }
+        
+        location / {
+            proxy_pass http://frontend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Platform "admin";
+            proxy_intercept_errors on;
+            error_page 404 = /index.html;
+        }
+    }
+    
+    # Fallback HTTP servers (optional)
+    server {
+        listen 8080;
+        server_name _;
+        location / {
+            proxy_pass http://frontend;
+            proxy_set_header X-Platform "admin";
+        }
+    }
+    
+    server {
+        listen 8081;
+        server_name _;
+        location / {
+            proxy_pass http://frontend;
+            proxy_set_header X-Platform "doctor";
+        }
+    }
+}
+```
+
+#### 3. Docker Compose Port Mapping | Docker Compose 端口映射
+
+**File: `docker-compose.yml`**
+
+```yaml
+services:
+  nginx:
+    build:
+      context: ./docker/nginx
+      dockerfile: Dockerfile
+    container_name: medicare_nginx
+    ports:
+      # HTTP
+      - "0.0.0.0:80:80"
+      # HTTPS - Patient
+      - "0.0.0.0:443:443"
+      # HTTP Fallback - Admin/Doctor
+      - "0.0.0.0:8080:8080"
+      - "0.0.0.0:8081:8081"
+      # HTTPS - Doctor & Admin (NEW)
+      - "0.0.0.0:8443:8443"
+      - "0.0.0.0:8444:8444"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./docker/nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - medicare_network
+    restart: unless-stopped
+```
+
+#### 4. SSL Certificate Setup Script | SSL 证书设置脚本
+
+**File: `scripts/setup-ssl.sh`**
+
+```bash
+#!/bin/bash
+# setup-ssl.sh - SSL Certificate Setup Script
+
+set -e
+
+DOMAIN="${1:-openmedicareai.life}"
+EMAIL="${2:-your-email@example.com}"
+
+echo "Setting up SSL certificates for $DOMAIN..."
+
+# Install certbot if not exists
+if ! command -v certbot &> /dev/null; then
+    echo "Installing certbot..."
+    sudo apt-get update
+    sudo apt-get install -y certbot
+fi
+
+# Create SSL directory
+mkdir -p docker/nginx/ssl
+
+# Obtain certificate
+echo "Obtaining SSL certificate..."
+sudo certbot certonly --standalone -d "$DOMAIN" --agree-tos --email "$EMAIL" -n
+
+# Copy certificates
+echo "Copying certificates..."
+sudo cp "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" docker/nginx/ssl/cert.pem
+sudo cp "/etc/letsencrypt/live/$DOMAIN/privkey.pem" docker/nginx/ssl/key.pem
+
+# Set correct permissions (CRITICAL!)
+echo "Setting permissions..."
+sudo chown "$USER:$USER" docker/nginx/ssl/*
+chmod 644 docker/nginx/ssl/cert.pem
+chmod 600 docker/nginx/ssl/key.pem
+
+# Setup auto-renewal
+echo "Setting up auto-renewal..."
+(crontab -l 2>/dev/null; echo "0 12 * * * /usr/bin/certbot renew --quiet") | crontab -
+
+echo "✅ SSL setup complete!"
+echo "Certificates location: docker/nginx/ssl/"
+echo "Auto-renewal: Enabled (daily at 12:00)"
+```
+
+Make it executable | 赋予执行权限:
+```bash
+chmod +x scripts/setup-ssl.sh
+./scripts/setup-ssl.sh openmedicareai.life your-email@example.com
+```
+
+---
+
+### Production Deployment Verification | 生产部署验证
+
+#### Pre-Deployment Checks | 部署前检查
+
+```bash
+# 1. Verify configuration files
+git diff frontend/vite.config.ts
+git diff frontend/src/lib/config.ts
+git diff docker/nginx/nginx.conf
+
+# 2. Check SSL certificates
+ls -la docker/nginx/ssl/
+openssl x509 -in docker/nginx/ssl/cert.pem -noout -dates
+
+# 3. Validate nginx configuration
+docker compose exec nginx nginx -t
+
+# 4. Check environment variables
+grep -E "DEBUG|PASSWORD|SECRET" .env | grep -v "^#"
+```
+
+#### Post-Deployment Verification | 部署后验证
+
+```bash
+# Test all HTTPS endpoints
+echo "Testing Patient Platform (443)..."
+curl -s -o /dev/null -w "%{http_code}" https://localhost --insecure
+
+echo "Testing Doctor Platform (8443)..."
+curl -s -o /dev/null -w "%{http_code}" https://localhost:8443 --insecure
+
+echo "Testing Admin Platform (8444)..."
+curl -s -o /dev/null -w "%{http_code}" https://localhost:8444 --insecure
+
+# Test admin login with platform parameter
+echo "Testing Admin Login..."
+curl -X POST https://localhost:8444/api/v1/auth/login --insecure \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@medicare.ai","password":"admin123456","platform":"admin"}' \
+  | grep -q "access_token" && echo "✅ Login successful" || echo "❌ Login failed"
+
+# Check SSL certificate expiration
+echo "SSL Certificate Expiry:"
+openssl x509 -in docker/nginx/ssl/cert.pem -noout -dates
+```
+
+---
+
+### Security Hardening Checklist | 安全加固清单
+
+#### Network Security | 网络安全
+
+- [ ] Configure firewall (UFW/iptables) to only allow necessary ports
+- [ ] Disable root SSH login
+- [ ] Use SSH key authentication only
+- [ ] Install and configure fail2ban
+- [ ] Enable automatic security updates
+
+```bash
+# UFW Configuration
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp      # SSH
+sudo ufw allow 80/tcp      # HTTP
+sudo ufw allow 443/tcp     # HTTPS Patient
+sudo ufw allow 8443/tcp    # HTTPS Doctor
+sudo ufw allow 8444/tcp    # HTTPS Admin
+sudo ufw enable
+```
+
+#### SSL/TLS Security | SSL/TLS 安全
+
+- [ ] Use TLS 1.2+ only
+- [ ] Configure strong cipher suites
+- [ ] Enable HSTS (HTTP Strict Transport Security)
+- [ ] Setup SSL certificate auto-renewal
+- [ ] Monitor certificate expiration
+
+#### Application Security | 应用安全
+
+- [ ] Change all default passwords
+- [ ] Configure strong CORS policy
+- [ ] Enable request rate limiting
+- [ ] Setup audit logging
+- [ ] Configure backup strategy
+
+---
+
+### Troubleshooting Production Issues | 生产环境问题排查
+
+#### Issue: SSL Certificate Not Loading
+
+```bash
+# Check certificate permissions
+ls -la docker/nginx/ssl/
+
+# Verify certificate validity
+openssl x509 -in docker/nginx/ssl/cert.pem -noout -text
+
+# Check nginx error logs
+docker compose logs nginx | grep -i "ssl\|error"
+
+# Fix permissions
+sudo chown $USER:$USER docker/nginx/ssl/*
+chmod 644 docker/nginx/ssl/cert.pem
+chmod 600 docker/nginx/ssl/key.pem
+```
+
+#### Issue: Port Already in Use
+
+```bash
+# Find process using port
+sudo lsof -i :8443
+sudo lsof -i :8444
+
+# Kill process or change port
+sudo kill -9 <PID>
+```
+
+#### Issue: Container Won't Start
+
+```bash
+# Check container logs
+docker compose logs -f <service_name>
+
+# Check for port conflicts
+sudo netstat -tlnp | grep -E "8443|8444"
+
+# Restart with clean state
+docker compose down -v
+docker compose up -d
+```
+
+---
+
+### Changelog | 更新日志
+
+#### Version 1.1.0 (2026-03-02)
+- Added multi-platform HTTPS configuration (ports 8443, 8444)
+- Added Vite allowedHosts configuration
+- Added API_BASE relative path configuration
+- Added SSL certificate permission setup
+- Added production deployment verification scripts
+- Updated firewall configuration for new ports
+
+#### Version 1.0.0 (2026-02-25)
+- Initial release
+- Complete migration guide from development to production
+- CORS, SSL, database, and monitoring configurations
+
+---
+
+**Last Updated | 最后更新:** 2026-03-02  
+**Version | 版本:** 1.1.0  
+**Maintainer | 维护者:** MediCareAI Team

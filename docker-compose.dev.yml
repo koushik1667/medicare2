@@ -1,0 +1,141 @@
+# Docker Compose Configuration for Local/Home Deployment
+# 本地/家庭部署配置文件 (无需 SSL 证书)
+#
+# 使用方法 | Usage:
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# 特点 | Features:
+#   - 纯 HTTP 访问，无需 SSL 证书
+#   - 简化的端口映射
+#   - 适合家庭内网使用
+#   - 自动初始化数据库
+
+services:
+  # PostgreSQL数据库 (with pgvector extension)
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: medicare_postgres
+    environment:
+      POSTGRES_DB: medicareai
+      POSTGRES_USER: medicare_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medicare123456}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "127.0.0.1:5432:5432"  # 仅本地访问，增加安全性
+    networks:
+      - medicare_network
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medicare_user -d medicareai"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # Redis缓存
+  redis:
+    image: redis:7.4-alpine
+    container_name: medicare_redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123456}
+    ports:
+      - "127.0.0.1:6379:6379"  # 仅本地访问
+    volumes:
+      - redis_data:/data
+    networks:
+      - medicare_network
+    restart: always
+
+  # 后端API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        - USE_CN_MIRROR=${USE_CN_MIRROR:-false}
+    container_name: medicare_backend
+    # 开发环境使用单进程，便于调试
+    command: ["--reload"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://medicare_user:${POSTGRES_PASSWORD:-medicare123456}@medicare_postgres:5432/medicareai
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis123456}@medicare_redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your-secret-key-change-in-production}
+      MINERU_TOKEN: ${MINERU_TOKEN:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_API_URL: ${AI_API_URL:-http://localhost:8033/v1/}
+      DEBUG: "true"
+      POSTGRES_HOST: medicare_postgres
+      POSTGRES_USER: medicare_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medicare123456}
+      POSTGRES_DB: medicareai
+    ports:
+      - "127.0.0.1:8000:8000"  # 仅本地访问
+    volumes:
+      - ./backend:/app
+      - ./.env:/app/.env
+      - uploads_data:/app/uploads
+      - kb_data:/app/data/knowledge_bases
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - medicare_network
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+
+  # 前端应用
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: medicare_frontend
+    environment:
+      - CHOKIDAR_USE_POLLING=true
+      - ESLINT_NO_CACHE=true
+      - VITE_API_BASE_URL=http://localhost:8000
+    ports:
+      - "127.0.0.1:3000:3000"  # 仅本地访问
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    networks:
+      - medicare_network
+    restart: unless-stopped
+
+  # Nginx反向代理 (HTTP only - 无 SSL)
+  nginx:
+    build:
+      context: ./docker/nginx
+      dockerfile: Dockerfile
+    container_name: medicare_nginx
+    ports:
+      - "0.0.0.0:80:80"        # 患者平台 HTTP
+      - "0.0.0.0:8080:8080"    # 管理员平台 HTTP
+      - "0.0.0.0:8081:8081"    # 医生平台 HTTP
+      # 注意：本地部署不使用 443 SSL 端口
+    volumes:
+      - ./docker/nginx/nginx-dev.conf:/etc/nginx/nginx.conf  # 使用开发版配置
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - medicare_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads_data:
+  kb_data:
+  frontend_node_modules:
+
+networks:
+  medicare_network:
+    driver: bridge

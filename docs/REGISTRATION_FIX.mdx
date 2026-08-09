@@ -1,0 +1,239 @@
+{/*
+  Registration Bug Fixes Summary | 患者注册问题修复总结
+  
+  修复了患者注册后的两个关键问题：
+  1. 注册后自动登录问题
+  2. 注册时地址信息未保存问题
+*/}
+
+# 患者注册问题修复总结 | Patient Registration Bug Fixes
+
+> **修复日期 | Fix Date:** 2026-02-26  
+> **问题类型 | Issue Type:** 功能逻辑错误 / Functional Logic Error  
+> **影响范围 | Impact:** 患者注册流程 / Patient Registration Flow
+
+---
+
+## 🐛 问题描述 | Problem Description
+
+### 问题一：注册后自动登录 | Auto-login After Registration
+
+**现象 | Symptoms:**
+- 患者完成注册后，系统自动登录并跳转到患者端主页
+- 期望行为：注册成功后返回登录页面，由用户手动登录
+
+**根本原因 | Root Cause:**
+- 后端注册API返回登录token（auth.py）
+- 前端AuthContext存储token并自动跳转（AuthContext.tsx）
+
+### 问题二：地址信息未保存 | Address Not Saved
+
+**现象 | Symptoms:**
+- 注册页面填写的地址信息在注册后丢失
+- 进入"个人中心"需要重新填写地址
+- 用户表的address字段为空
+
+**根本原因 | Root Cause:**
+- UserCreate schema缺少address字段（user.py）
+- 注册端点未将address传递给UserService（auth.py）
+- UserService.create_user方法不接受address参数
+
+---
+
+## 🔧 修复方案 | Fix Solution
+
+### 修复一：移除自动登录 | Remove Auto-login
+
+**后端修改 | Backend Changes:**
+
+1. **auth.py** - 注册端点不再返回token
+```python
+# 修改前 | Before:
+return {"user": user, "tokens": tokens}
+
+# 修改后 | After:
+return {
+    "message": "注册成功，请登录",
+    "user_id": str(user.id),
+    "email": user.email,
+}
+```
+
+**前端修改 | Frontend Changes:**
+
+2. **AuthContext.tsx** - 注册后不存储token
+```typescript
+// 修改前 | Before:
+localStorage.setItem(CONFIG.TOKEN_KEY, response.tokens.access_token);
+localStorage.setItem(CONFIG.REFRESH_TOKEN_KEY, response.tokens.refresh_token);
+setUser(response.user);
+window.location.href = roleRoutes[response.user.role] || '/';
+
+// 修改后 | After:
+// 注册成功，不自动登录，不存储token
+// 由调用方（RegisterPage）处理跳转
+```
+
+### 修复二：保存地址信息 | Save Address
+
+**后端修改 | Backend Changes:**
+
+1. **user.py** - UserCreate添加address字段
+```python
+class UserCreate(UserBase):
+    password: str
+    date_of_birth: Optional[str] = None
+    gender: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None  # ✅ 新增
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+```
+
+2. **auth.py** - 注册时传递address
+```python
+# 创建用户时传递地址
+user = await user_service.create_user(
+    email=user_data.email,
+    password=user_data.password,
+    full_name=user_data.full_name,
+    address=user_data.address,  # ✅ 新增
+)
+
+# 创建患者档案时传递地址
+patient_data = PatientCreate(
+    date_of_birth=date_of_birth,
+    gender=user_data.gender,
+    phone=user_data.phone,
+    address=user_data.address,  # ✅ 新增
+    emergency_contact=emergency_contact,
+)
+```
+
+3. **user_service.py** - create_user接受address参数
+```python
+async def create_user(self, email: str, password: str, full_name: str, address: Optional[str] = None) -> User:
+    # ...
+    user = User(email=email, password_hash=password_hash, full_name=full_name, address=address)
+```
+
+---
+
+## 📋 修改文件清单 | Modified Files
+
+| 文件路径 | 修改类型 | 说明 |
+|---------|---------|------|
+| `backend/app/schemas/user.py` | 修改 | UserCreate添加address字段 |
+| `backend/app/api/api_v1/endpoints/auth.py` | 修改 | 注册不返回token，传递address |
+| `backend/app/services/user_service.py` | 修改 | create_user接受address参数 |
+| `frontend/src/contexts/AuthContext.tsx` | 修改 | 注册后不自动登录 |
+
+---
+
+## ✅ 验证步骤 | Verification Steps
+
+### 1. 语法检查 | Syntax Check
+
+```bash
+cd /home/houge/Test/MediCareAI
+python -m py_compile backend/app/schemas/user.py \
+  backend/app/api/api_v1/endpoints/auth.py \
+  backend/app/services/user_service.py
+# ✅ 通过
+```
+
+### 2. 功能测试 | Functional Testing
+
+**测试场景一：注册后不自动登录**
+1. 访问患者注册页面
+2. 填写完整注册信息
+3. 点击"立即注册"
+4. 期望结果：显示"注册成功"，跳转至登录页面
+5. 验证：未自动登录，需要输入密码登录
+
+**测试场景二：地址信息保存**
+1. 在注册页面填写地址信息
+2. 完成注册并登录
+3. 进入"个人中心"
+4. 期望结果：地址信息已预填，无需重新输入
+5. 验证数据库：user.address字段有值
+
+---
+
+## 🎯 预期行为 | Expected Behavior
+
+### 修复后流程 | Fixed Flow
+
+```
+患者访问注册页面
+    ↓
+填写注册信息（包含地址）
+    ↓
+点击"立即注册"
+    ↓
+后端：创建用户 + 创建患者档案（保存地址）
+    ↓
+返回：{message: "注册成功，请登录"}
+    ↓
+前端：显示成功消息
+    ↓
+跳转至登录页面（不自动登录）
+    ↓
+患者手动输入邮箱密码登录
+    ↓
+进入个人中心，地址信息已保存
+```
+
+---
+
+## 📝 数据流 | Data Flow
+
+### 地址信息流向 | Address Data Flow
+
+```
+注册表单（address字段）
+    ↓
+RegisterData类型
+    ↓
+POST /api/v1/auth/register
+    ↓
+UserCreate schema（新增address字段）✅
+    ↓
+注册端点处理
+    ├─→ UserService.create_user(address=...) ✅
+    │       ↓
+    │   User表address字段
+    │
+    └─→ PatientCreate(address=...) ✅
+            ↓
+        Patient表address字段
+```
+
+---
+
+## 🔮 后续优化 | Future Improvements
+
+1. **地址验证 | Address Validation**
+   - 添加地址格式验证
+   - 支持省市区三级选择
+
+2. **注册确认邮件 | Confirmation Email**
+   - 发送注册确认邮件
+   - 验证邮箱后再允许登录
+
+3. **注册信息完善 | Profile Completion**
+   - 首次登录引导完善信息
+   - 地址地图选择功能
+
+---
+
+## 🎉 总结 | Summary
+
+通过本次修复：
+1. ✅ 患者注册后不再自动登录，需手动登录
+2. ✅ 注册时填写的地址信息正确保存到数据库
+3. ✅ 个人中心页面可正常显示已保存的地址
+
+**修复状态 | Fix Status:** ✅ 已完成 / Completed  
+**代码验证 | Code Verification:** ✅ 通过 / Passed  
+**待测试 | Pending Testing:** 注册流程 / Registration Flow

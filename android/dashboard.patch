@@ -1,0 +1,82 @@
+--- a/android/app/src/main/java/com/medicareai/patient/ui/screens/DashboardScreen.kt
++++ b/android/app/src/main/java/com/medicareai/patient/ui/screens/DashboardScreen.kt
+@@ -265,11 +265,13 @@ fun DashboardScreen(
+                 Column(
+                     modifier = Modifier.padding(16.dp)
+                 ) {
++                    // Centered title with larger font
+                     Row(
+                         verticalAlignment = Alignment.CenterVertically,
+-                        modifier = Modifier.padding(bottom = 12.dp)
++                        horizontalArrangement = Arrangement.Center,
++                        modifier = Modifier
++                            .fillMaxWidth()
++                            .padding(bottom = 12.dp)
+                     ) {
+                         Icon(
+                             imageVector = Icons.Default.Star,
+@@ -279,8 +281,8 @@ fun DashboardScreen(
+                         Spacer(modifier = Modifier.width(8.dp))
+                         Text(
+                             text = "法律信息",
+-                            style = MaterialTheme.typography.titleMedium,
+-                            fontWeight = FontWeight.SemiBold
++                            style = MaterialTheme.typography.titleLarge,
++                            fontWeight = FontWeight.Bold
+                         )
+                     }
+                     
+@@ -315,11 +317,44 @@ fun DashboardScreen(
+                 }
+             }
+             
++            Spacer(modifier = Modifier.height(16.dp))
++            
++            // Support Open Source
++            val context = androidx.compose.ui.platform.LocalContext.current
++            Card(
++                modifier = Modifier.fillMaxWidth(),
++                shape = RoundedCornerShape(12.dp),
++                colors = CardDefaults.cardColors(
++                    containerColor = MaterialTheme.colorScheme.primaryContainer
++                ),
++                onClick = {
++                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
++                        data = android.net.Uri.parse("https://github.com/HougeLangley/MediCareAI#-%E6%94%AF%E6%8C%81%E4%BD%9C%E8%80%85--support-the-author")
++                    }
++                    context.startActivity(intent)
++                }
++            ) {
++                Row(
++                    modifier = Modifier
++                        .fillMaxWidth()
++                        .padding(16.dp),
++                    horizontalArrangement = Arrangement.Center,
++                    verticalAlignment = Alignment.CenterVertically
++                ) {
++                    Icon(
++                        imageVector = Icons.Default.Favorite,
++                        contentDescription = null,
++                        tint = MaterialTheme.colorScheme.primary
++                    )
++                    Spacer(modifier = Modifier.width(8.dp))
++                    Text(
++                        text = "支持 MediCareAI 开源项目",
++                        style = MaterialTheme.typography.titleMedium,
++                        fontWeight = FontWeight.SemiBold,
++                        color = MaterialTheme.colorScheme.onPrimaryContainer
++                    )
++                }
++            }
++            
+             Spacer(modifier = Modifier.height(24.dp))
+             
+             // Footer
+             Text(
+                 text = "MediCareAI 使用先进的 AI 技术为您提供智能诊疗建议。\n本系统仅供参考，请以医生的实际诊断为准。\n作者：苏业钦 | License: MIT",
+                 style = MaterialTheme.typography.bodySmall,
+-                color = Color.Gray,
++                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                 modifier = Modifier.fillMaxWidth()
+             )

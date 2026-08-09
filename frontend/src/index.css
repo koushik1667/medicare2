@@ -1,0 +1,93 @@
+:root {
+  --font-serif: 'Fraunces', Georgia, serif;
+  --font-sans: 'Nunito', 'Quicksand', -apple-system, BlinkMacSystemFont, sans-serif;
+  --bg-rice-paper: #FDFCF8;
+  --color-loam: #2C2C24;
+  --color-moss: #5D7052;
+  --color-terracotta: #C18C5D;
+  --color-sand: #E6DCCD;
+  --color-stone: #F0EBE5;
+  --color-timber: #DED8CF;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-rice-paper);
+  color: var(--color-loam);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Paper noise grain texture overlay */
+body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  mix-blend-mode: multiply;
+}
+
+h1, h2, h3, h4, .font-serif {
+  font-family: var(--font-serif);
+  font-optical-sizing: auto;
+}
+
+/* Organic Blob Shapes */
+.blob-shape-1 {
+  border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+}
+
+.blob-shape-2 {
+  border-radius: 40% 60% 70% 30% / 50% 60% 40% 50%;
+}
+
+.blob-shape-3 {
+  border-radius: 70% 30% 50% 50% / 30% 60% 40% 70%;
+}
+
+.organic-card {
+  border-radius: 2rem;
+  border: 1px solid rgba(222, 216, 207, 0.6);
+  background-color: #FEFEFA;
+  box-shadow: 0 8px 32px -4px rgba(93, 112, 82, 0.12);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.organic-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 40px -6px rgba(93, 112, 82, 0.18);
+  border-color: rgba(193, 140, 93, 0.5);
+}
+
+.organic-pill {
+  border-radius: 9999px;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-rice-paper);
+}
+::-webkit-scrollbar-thumb {
+  background: #C8BFB2;
+  border-radius: 5px;
+  border: 2px solid var(--bg-rice-paper);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-moss);
+}
