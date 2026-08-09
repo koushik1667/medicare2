@@ -1,6 +1,10 @@
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios';
-import { CONFIG } from '../lib/config';
-import { useAuthStore } from '../store/authStore';
+import type {
+  EmailConfig,
+  EmailConfigCreate,
+  EmailConfigUpdate,
+  EmailProviderPreset,
+  ProviderCategory,
+} from '../types/email';
 import type {
   ApiResponse,
   ApiErrorResponse,
@@ -71,59 +75,38 @@ apiClient.interceptors.response.use(
     if (isLoginRequest && error.response?.status === 401) {
       // Return the error without redirect for login failures
       // 对于登录失败，直接返回错误而不重定向
-      const responseData = error.response?.data as ApiErrorResponse;
+      const responseData = (error.response?.data as unknown) as ApiErrorResponse;
       const errorMessage = responseData?.detail || responseData?.message || '登录失败 / Login failed';
       return Promise.reject(new Error(errorMessage));
     }
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
-
       try {
         const refreshToken = localStorage.getItem(CONFIG.REFRESH_TOKEN_KEY);
-        if (!refreshToken) {
-          throw new Error('No refresh token');
-        }
+        if (refreshToken) {
+          const { data } = await apiClient.post<ApiResponse<Token>>('/auth/refresh', {
+            refresh_token: refreshToken,
+          });
 
-        const response = await axios.post(`${CONFIG.API_BASE}${CONFIG.API_VERSION}/auth/refresh`, {
-          refresh_token: refreshToken,
-        });
-
-        // Enhanced null checking for response data
-        const responseData = response?.data;
-        if (!responseData?.data) {
-          throw new Error('Invalid refresh token response');
+          const tokens = data.data || data;
+          if (tokens.access_token) {
+            localStorage.setItem(CONFIG.TOKEN_KEY, tokens.access_token);
+            if (tokens.refresh_token) {
+              localStorage.setItem(CONFIG.REFRESH_TOKEN_KEY, tokens.refresh_token);
+            }
+            if (originalRequest.headers) {
+              originalRequest.headers.Authorization = `Bearer ${tokens.access_token}`;
+            }
+            return apiClient(originalRequest);
+          }
         }
-        
-        const { access_token, refresh_token } = responseData.data as Token;
-        if (!access_token || !refresh_token) {
-          throw new Error('Missing tokens in response');
-        }
-        
-        localStorage.setItem(CONFIG.TOKEN_KEY, access_token);
-        localStorage.setItem(CONFIG.REFRESH_TOKEN_KEY, refresh_token);
-
-
-        if (originalRequest.headers) {
-          originalRequest.headers.Authorization = `Bearer ${access_token}`;
-        }
-        return apiClient(originalRequest);
-      } catch {
+      } catch (refreshError) {
+        localStorage.removeItem(CONFIG.TOKEN_KEY);
+        localStorage.removeItem(CONFIG.REFRESH_TOKEN_KEY);
         useAuthStore.getState().logout();
-        
-        // Determine redirect URL based on current platform
-        // 根据当前平台决定重定向URL
-        const port = window.location.port || '80';
         const currentPath = window.location.pathname;
-        
-        // Don't redirect if already on a login page
-        // 如果已经在登录页面，则不重定向
-        if (currentPath.includes('login')) {
-          return Promise.reject(error);
-        }
-        
-        // Redirect to appropriate login page based on port/platform
-        // 根据端口/平台重定向到相应的登录页面
+        const port = window.location.port || '80';
         if (port === '8080' || currentPath.startsWith('/admin')) {
           window.location.href = '/admin-login';
         } else if (port === '8081' || currentPath.startsWith('/doctor')) {
@@ -131,11 +114,11 @@ apiClient.interceptors.response.use(
         } else {
           window.location.href = '/login';
         }
-        return Promise.reject(error);
+        return Promise.reject(refreshError);
       }
     }
 
-    const responseData = error.response?.data as ApiErrorResponse;
+    const responseData = (error.response?.data as unknown) as ApiErrorResponse;
     const errorMessage = responseData?.detail || responseData?.message || error.message;
     console.error('API Error:', errorMessage);
     return Promise.reject(new Error(errorMessage));
@@ -594,7 +577,7 @@ export const adminApi = {
     relevance_score: number;
     original_chunks_count: number;
     message: string;
-  }>('/vector-embedding/knowledge-base/compress'),
+  }>('/vector-embedding/knowledge-base/compress', params),
   // AI Model APIs
   getAIModels: () => api.get<AIModelConfigs>('/admin/ai-models'),
   testAIModel: (modelType: string, config?: AIModelConfig) => api.post<unknown>(`/admin/ai-models/${modelType}/test`, config || {}),

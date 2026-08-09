@@ -29,13 +29,10 @@ import {
   Send as SendIcon,
   Psychology as PsychologyIcon,
   Description as DescriptionIcon,
-  CheckCircle as CheckCircleIcon,
-  AutoAwesome as AutoAwesomeIcon,
   AssignmentTurnedIn as AssignmentIcon,
   Translate as TranslateIcon,
   SmartToy as SmartToyIcon,
   Visibility as VisibilityIcon,
-  LocalHospital as HospitalIcon,
   Medication as MedicationIcon,
   Code as CodeIcon,
   ContentCopy as CopyIcon,
@@ -52,7 +49,7 @@ import {
 } from '../../services/agenticMedicalAI';
 
 const SymptomSubmit: React.FC = () => {
-  const { t, language } = useLanguage();
+  const { language } = useLanguage();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form State
@@ -558,6 +555,7 @@ const SymptomSubmit: React.FC = () => {
                 <Typography variant="h5" sx={{ fontFamily: 'Fraunces, serif', fontWeight: 700, color: '#2C2C24' }}>
                   Agentic Document Intelligence Results
                 </Typography>
+                {streamingStatus && <Chip label={streamingStatus} color="success" size="small" sx={{ fontWeight: 700, borderRadius: 9999 }} />}
               </Stack>
 
               {/* View Mode Toggle: Clinical Markdown vs n8n JSON Schema */}
